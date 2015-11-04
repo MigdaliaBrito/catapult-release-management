@@ -4,6 +4,7 @@ source "/catapult/provisioners/redhat/modules/catapult.sh"
 # suppress this - There were 34877 failed login attempts since the last successful login.
 echo -e "$(lastb | head -n -2 | wc -l) failed login attempts"
 echo -e "$(last | head -n -2 | wc -l) successful login attempts"
+sudo last
 sed -i -e "/PasswordAuthentication/d" /etc/ssh/sshd_config
 if ! grep -q "PasswordAuthentication no" "/etc/ssh/sshd_config"; then
    sudo bash -c 'echo "PasswordAuthentication no" >> /etc/ssh/sshd_config'
@@ -20,7 +21,7 @@ sudo cat > "/root/.forward" << EOF
 EOF
 
 # send an email with catapult stack
-if [ "$1" != "dev" ]; then
+if [ "$1" = "production" ]; then
     sudo touch /tmp/email.txt
     sudo echo -e "Subject: Catapult ($(echo "${configuration}" | shyaml get-value company.name)) - Environment Update" >> /tmp/email.txt
     sudo echo -e "\n" >> /tmp/email.txt
