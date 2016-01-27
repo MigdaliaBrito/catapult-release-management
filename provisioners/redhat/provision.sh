@@ -25,14 +25,17 @@ echo "   \_\__/   \_\__/          \_\__/   \_\__/     "
 
 
 echo -e "\n\n\n==> SYSTEM INFORMATION"
-echo -e "CPU"
+echo -e "SYSTEM"
+cat /etc/centos-release
+hostnamectl status
+echo -e "\nCPU"
 cat /proc/cpuinfo | grep 'model name' | cut -d: -f2 | awk 'NR==1' | tr -d " "
 echo -e "$(top -bn 1 | awk '{print $9}' | tail -n +8 | awk '{s+=$1} END {print s}')% utilization"
-echo -e "\nHDD"
+echo -e "\nDISKS"
 df -h
-echo -e "\nNET"
+echo -e "\nNETWORK"
 ifconfig
-echo -e "\nRAM"
+echo -e "\nMEMORY"
 free -h
 
 
@@ -48,8 +51,34 @@ sudo yum install -y git
 # initialize known_hosts
 sudo mkdir -p ~/.ssh
 sudo touch ~/.ssh/known_hosts
-sudo ssh-keyscan -T 10 bitbucket.org > ~/.ssh/known_hosts
-sudo ssh-keyscan -T 10 github.com >> ~/.ssh/known_hosts
+# ssh-keyscan bitbucket.org for a maximum of 10 tries
+n=0
+until [ $n -ge 10 ]
+do
+    sudo ssh-keyscan bitbucket.org > ~/.ssh/known_hosts
+    if ! grep -q "bitbucket\.org" ~/.ssh/known_hosts; then
+        echo "ssh-keyscan for bitbucket.org failed, retrying!"
+    else
+        echo "ssh-keyscan for bitbucket.org successful"
+        break
+    fi
+    n=$[$n+1]
+    sleep 1
+done
+# ssh-keyscan github.com for a maximum of 10 tries
+n=0
+until [ $n -ge 10 ]
+do
+    sudo ssh-keyscan github.com >> ~/.ssh/known_hosts
+    if ! grep -q "github\.com" ~/.ssh/known_hosts; then
+        echo "ssh-keyscan for github.com failed, retrying!"
+    else
+        echo "ssh-keyscan for github.com successful"
+        break
+    fi
+    n=$[$n+1]
+    sleep 1
+done
 # clone and pull catapult
 if ([ $1 = "dev" ] || [ $1 = "test" ]); then
     branch="develop"
@@ -94,12 +123,12 @@ if [ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redha
         # if multithreading is supported
         if ([ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.${module}.multithreading) == "True" ]); then
             # cleanup leftover utility files
-            for file in "/catapult/provisioners/redhat/logs/${module}.*.log"; do
+            for file in /catapult/provisioners/redhat/logs/${module}.*.log; do
                 if [ -e "$file" ]; then
                     rm $file
                 fi
             done
-            for file in "/catapult/provisioners/redhat/logs/${module}.*.complete"; do
+            for file in /catapult/provisioners/redhat/logs/${module}.*.complete; do
                 if [ -e "$file" ]; then
                     rm $file
                 fi
@@ -109,14 +138,14 @@ if [ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redha
             # get configuration
             source "/catapult/provisioners/redhat/modules/catapult.sh"
             # loop through websites and pass to subprocesses
-            websiteN=0
+            website_index=0
             echo "${configuration}" | shyaml get-values-0 websites.apache |
             while read -r -d $'\0' website; do
-                bash "/catapult/provisioners/redhat/modules/${module}.sh" $1 $2 $3 $4 $websiteN >> "/catapult/provisioners/redhat/logs/${module}.$(echo "${website}" | shyaml get-value domain).log" 2>&1 &
-                (( websiteN += 1 ))
+                bash "/catapult/provisioners/redhat/modules/${module}.sh" $1 $2 $3 $4 $website_index >> "/catapult/provisioners/redhat/logs/${module}.$(echo "${website}" | shyaml get-value domain).log" 2>&1 &
+                (( website_index += 1 ))
             done
             # determine when each subprocess finishes
-            cpuN=()
+            cpu_load_samples=()
             while read -r -d $'\0' website; do
                 domain=$(echo "${website}" | shyaml get-value domain)
                 domain_tld_override=$(echo "${website}" | shyaml get-value domain_tld_override 2>/dev/null )
@@ -124,8 +153,8 @@ if [ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redha
                 software_dbprefix=$(echo "${website}" | shyaml get-value software_dbprefix 2>/dev/null )
                 software_workflow=$(echo "${website}" | shyaml get-value software_workflow 2>/dev/null )
                 while [ ! -e "/catapult/provisioners/redhat/logs/${module}.${domain}.complete" ]; do
-                    cpu_decimal=$(top -bn 1 | awk '{print $9}' | tail -n +8 | awk '{s+=$1} END {print s}')
-                    cpuN+=(${cpu_decimal%.*})
+                    cpu_load_sample_decimal=$(top -bn 1 | awk '{print $9}' | tail -n +8 | awk '{s+=$1} END {print s}')
+                    cpu_load_samples+=(${cpu_load_sample_decimal%.*})
                     sleep 1
                 done
                 echo -e "=> domain: ${domain}"
@@ -135,16 +164,22 @@ if [ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redha
                 echo -e "=> software_workflow: ${software_workflow}"
                 cat "/catapult/provisioners/redhat/logs/${module}.${domain}.log" | sed 's/^/     /'
             done < <(echo "${configuration}" | shyaml get-values-0 websites.apache)
-            IFS=+ read <<< "${cpuN[*]}"
-            ((sum=REPLY))
-            total="${#cpuN[@]}"
-            echo -e "==> CPU USAGE: $((sum / total))% from $total samples"
-            # cleanup utility files
-            for file in "/catapult/provisioners/redhat/logs/${module}.*.log"; do
-                rm $file
+            cpu_load_samples_sum=0
+            for i in ${cpu_load_samples[@]}; do
+              let cpu_load_samples_sum+=$i
             done
-            for file in "/catapult/provisioners/redhat/logs/${module}.*.complete"; do
-                rm $file
+            cpu_load_samples_total="${#cpu_load_samples[@]}"
+            echo -e "==> CPU USAGE: $((cpu_load_samples_sum / cpu_load_samples_total))% from $cpu_load_samples_total samples"
+            # cleanup leftover utility files
+            for file in /catapult/provisioners/redhat/logs/${module}.*.log; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
+            done
+            for file in /catapult/provisioners/redhat/logs/${module}.*.complete; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
             done
         else
             bash "/catapult/provisioners/redhat/modules/${module}.sh" $1 $2 $3 $4
