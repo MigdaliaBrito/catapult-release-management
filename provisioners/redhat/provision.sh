@@ -25,14 +25,17 @@ echo "   \_\__/   \_\__/          \_\__/   \_\__/     "
 
 
 echo -e "\n\n\n==> SYSTEM INFORMATION"
-echo -e "CPU"
+echo -e "SYSTEM"
+cat /etc/centos-release
+hostnamectl status
+echo -e "\nCPU"
 cat /proc/cpuinfo | grep 'model name' | cut -d: -f2 | awk 'NR==1' | tr -d " "
 echo -e "$(top -bn 1 | awk '{print $9}' | tail -n +8 | awk '{s+=$1} END {print s}')% utilization"
-echo -e "\nHDD"
+echo -e "\nDISKS"
 df -h
-echo -e "\nNET"
+echo -e "\nNETWORK"
 ifconfig
-echo -e "\nRAM"
+echo -e "\nMEMORY"
 free -h
 
 
@@ -48,8 +51,34 @@ sudo yum install -y git
 # initialize known_hosts
 sudo mkdir -p ~/.ssh
 sudo touch ~/.ssh/known_hosts
-sudo ssh-keyscan -T 10 bitbucket.org > ~/.ssh/known_hosts
-sudo ssh-keyscan -T 10 github.com >> ~/.ssh/known_hosts
+# ssh-keyscan bitbucket.org for a maximum of 10 tries
+n=0
+until [ $n -ge 10 ]
+do
+    sudo ssh-keyscan bitbucket.org > ~/.ssh/known_hosts
+    if ! grep -q "bitbucket\.org" ~/.ssh/known_hosts; then
+        echo "ssh-keyscan for bitbucket.org failed, retrying!"
+    else
+        echo "ssh-keyscan for bitbucket.org successful"
+        break
+    fi
+    n=$[$n+1]
+    sleep 1
+done
+# ssh-keyscan github.com for a maximum of 10 tries
+n=0
+until [ $n -ge 10 ]
+do
+    sudo ssh-keyscan github.com >> ~/.ssh/known_hosts
+    if ! grep -q "github\.com" ~/.ssh/known_hosts; then
+        echo "ssh-keyscan for github.com failed, retrying!"
+    else
+        echo "ssh-keyscan for github.com successful"
+        break
+    fi
+    n=$[$n+1]
+    sleep 1
+done
 # clone and pull catapult
 if ([ $1 = "dev" ] || [ $1 = "test" ]); then
     branch="develop"
@@ -61,6 +90,8 @@ fi
 if [ $1 != "dev" ]; then
     if [ -d "/catapult/.git" ]; then
         cd /catapult && sudo git checkout ${branch}
+        cd /catapult && sudo git fetch
+        cd /catapult && sudo git diff --exit-code ${branch} origin/${branch} "secrets/configuration.yml.gpg"
         cd /catapult && sudo git pull
     else
         sudo git clone --recursive -b ${branch} $2 /catapult | sed "s/^/\t/"
@@ -75,49 +106,97 @@ else
 fi
 
 
-# provision server
-# @todo standardize apache/mysql to match server name?
-if [ "${4}" = "apache" ]; then
-
+# run server provision
+if [ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redhat.servers.redhat.$4.modules) ]; then
     provisionstart=$(date +%s)
-    echo -e "\n\n\n==> PROVISION: apache"
+    echo -e "\n\n\n==> PROVISION: ${4}"
+    # decrypt configuration
+    source "/catapult/provisioners/redhat/modules/catapult_decrypt.sh"
 
-    cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redhat.servers.redhat.modules |
-    while read -r -d $'\0' key value; do
+    # loop through each required module
+    cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redhat.servers.redhat.$4.modules |
+    while read -r -d $'\0' module; do
         start=$(date +%s)
-        echo -e "\n\n\n==> MODULE: ${key}"
-        echo -e "==> DESCRIPTION: $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.$key.description)"
-        bash "/catapult/provisioners/redhat/modules/${key}.sh" $1 $2 $3 $4
+        echo -e "\n\n\n==> MODULE: ${module}"
+        echo -e "==> DESCRIPTION: $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.${module}.description)"
+        echo -e "==> MULTITHREADING: $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.${module}.multithreading)"
+        # if multithreading is supported
+        if ([ $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.${module}.multithreading) == "True" ]); then
+            # cleanup leftover utility files
+            for file in /catapult/provisioners/redhat/logs/${module}.*.log; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
+            done
+            for file in /catapult/provisioners/redhat/logs/${module}.*.complete; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
+            done
+            # enable job control
+            set -m
+            # get configuration
+            source "/catapult/provisioners/redhat/modules/catapult.sh"
+            # loop through websites and pass to subprocesses
+            website_index=0
+            echo "${configuration}" | shyaml get-values-0 websites.apache |
+            while read -r -d $'\0' website; do
+                bash "/catapult/provisioners/redhat/modules/${module}.sh" $1 $2 $3 $4 $website_index >> "/catapult/provisioners/redhat/logs/${module}.$(echo "${website}" | shyaml get-value domain).log" 2>&1 &
+                (( website_index += 1 ))
+            done
+            # determine when each subprocess finishes
+            cpu_load_samples=()
+            while read -r -d $'\0' website; do
+                domain=$(echo "${website}" | shyaml get-value domain)
+                domain_tld_override=$(echo "${website}" | shyaml get-value domain_tld_override 2>/dev/null )
+                software=$(echo "${website}" | shyaml get-value software 2>/dev/null )
+                software_dbprefix=$(echo "${website}" | shyaml get-value software_dbprefix 2>/dev/null )
+                software_workflow=$(echo "${website}" | shyaml get-value software_workflow 2>/dev/null )
+                while [ ! -e "/catapult/provisioners/redhat/logs/${module}.${domain}.complete" ]; do
+                    cpu_load_sample_decimal=$(top -bn 1 | awk '{print $9}' | tail -n +8 | awk '{s+=$1} END {print s}')
+                    cpu_load_samples+=(${cpu_load_sample_decimal%.*})
+                    sleep 1
+                done
+                echo -e "=> domain: ${domain}"
+                echo -e "=> domain_tld_override: ${domain_tld_override}"
+                echo -e "=> software: ${software}"
+                echo -e "=> software_dbprefix: ${software_dbprefix}"
+                echo -e "=> software_workflow: ${software_workflow}"
+                cat "/catapult/provisioners/redhat/logs/${module}.${domain}.log" | sed 's/^/     /'
+            done < <(echo "${configuration}" | shyaml get-values-0 websites.apache)
+            cpu_load_samples_sum=0
+            for i in ${cpu_load_samples[@]}; do
+              let cpu_load_samples_sum+=$i
+            done
+            cpu_load_samples_total="${#cpu_load_samples[@]}"
+            echo -e "==> CPU USAGE: $((cpu_load_samples_sum / cpu_load_samples_total))% from $cpu_load_samples_total samples"
+            # cleanup leftover utility files
+            for file in /catapult/provisioners/redhat/logs/${module}.*.log; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
+            done
+            for file in /catapult/provisioners/redhat/logs/${module}.*.complete; do
+                if [ -e "$file" ]; then
+                    rm $file
+                fi
+            done
+        else
+            bash "/catapult/provisioners/redhat/modules/${module}.sh" $1 $2 $3 $4
+        fi
         end=$(date +%s)
-        echo -e "==> MODULE: ${key}"
+        echo -e "==> MODULE: ${module}"
         echo -e "==> DURATION: $(($end - $start)) seconds"
     done
 
     provisionend=$(date +%s)
-    echo -e "\n\n\n==> PROVISION: apache"
-    echo -e "==> DURATION: $(($provisionend - $provisionstart)) total seconds"
-
-elif [ "${4}" = "mysql" ]; then
-
-    provisionstart=$(date +%s)
-    echo -e "\n\n\n==> PROVISION: mysql"
-
-    cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 redhat.servers.redhat_mysql.modules |
-    while read -r -d $'\0' key value; do
-        start=$(date +%s)
-        echo -e "\n\n\n==> MODULE: ${key}"
-        echo -e "==> DESCRIPTION: $(cat "/catapult/provisioners/provisioners.yml" | shyaml get-value redhat.modules.$key.description)"
-        bash "/catapult/provisioners/redhat/modules/${key}.sh" $1 $2 $3 $4
-        end=$(date +%s)
-        echo -e "==> MODULE: ${key}"
-        echo -e "==> DURATION: $(($end - $start)) seconds"
-    done
-
-    provisionend=$(date +%s)
-    echo -e "\n\n\n==> PROVISION: mysql"
-    echo -e "==> DURATION: $(($provisionend - $provisionstart)) total seconds"
-
+    # remove configuration
+    source "/catapult/provisioners/redhat/modules/catapult_clean.sh"
+    echo -e "\n\n\n==> PROVISION: ${4}"
+    echo -e "==> DURATION: $(($provisionend - $provisionstart)) total seconds" | tee -a /catapult/provisioners/redhat/logs/$4.log
 else
     "Error: Cannot detect the server type."
     exit 1
 fi
+
+exit 0
