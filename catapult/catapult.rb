@@ -32,7 +32,7 @@ module Catapult
 
     # puts intro
     puts "\n"
-    title = "Catapult Release Management - https://github.com/devopsgroup-io/catapult-release-management"
+    title = "Catapult - https://github.com/devopsgroup-io/catapult"
     length = title.size
     padding = 5
     puts "+".ljust(padding,"-") + "".ljust(length,"-") + "+".rjust(padding,"-")
@@ -46,12 +46,10 @@ module Catapult
     require "json"
     require "net/ssh"
     require "net/http"
-    require "nokogiri"
     require "open-uri"
     require "openssl"
     require "resolv"
     require "securerandom"
-    require "socket"
     require "yaml"
 
 
@@ -393,7 +391,7 @@ module Catapult
       end
     end
     # create objects from secrets/configuration.yml.gpg and secrets/configuration.yml.template
-    @configuration = YAML.load(`gpg --batch --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --decrypt secrets/configuration.yml.gpg`)
+    @configuration = YAML.load(`gpg --verbose --batch --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --decrypt secrets/configuration.yml.gpg`)
     if $?.exitstatus > 0
       catapult_exception("Your configuration could not be decrypted, please confirm your team's gpg_key is correct in secrets/configuration-user.yml")
     end
@@ -655,29 +653,24 @@ module Catapult
         end
       end
     end
-    # http://www.monitor.us/api/api.html
-    if @configuration["company"]["monitorus_api_key"] == nil || @configuration["company"]["monitorus_secret_key"] == nil
-      catapult_exception("Please set [\"company\"][\"monitorus_api_key\"] and [\"company\"][\"monitorus_secret_key\"] in secrets/configuration.yml")
+    # https://docs.newrelic.com/docs/apis/rest-api-v2
+    if @configuration["company"]["newrelic_api_key"] == nil || @configuration["company"]["newrelic_license_key"] == nil
+      catapult_exception("Please set [\"company\"][\"newrelic_api_key\"] and [\"company\"][\"newrelic_license_key\"] in secrets/configuration.yml")
     else
-        uri = URI("http://monitor.us/api?action=authToken&apikey=#{@configuration["company"]["monitorus_api_key"]}&secretkey=#{@configuration["company"]["monitorus_secret_key"]}")
-        Net::HTTP.start(uri.host, uri.port) do |http|
-          request = Net::HTTP::Get.new uri.request_uri
-          response = http.request request # Net::HTTPResponse object
-          if response.code.to_f.between?(399,499)
-            catapult_exception("The monitor.us API could not authenticate, please verify [\"company\"][\"monitorus_api_key\"] and [\"company\"][\"monitorus_secret_key\"].")
-          elsif response.code.to_f.between?(500,600)
-            puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-          else
-            @api_monitorus = JSON.parse(response.body)
-            if @api_monitorus["error"]
-              catapult_exception("The monitor.us API could not authenticate, please verify [\"company\"][\"monitorus_api_key\"] and [\"company\"][\"monitorus_secret_key\"].")
-            else
-              puts " * monitor.us API authenticated successfully."
-              @api_monitorus_authtoken = @api_monitorus["authToken"]
-              puts "   - Successfully generated an authToken"
-            end
-          end
+      uri = URI("https://api.newrelic.com/v2/users.json")
+      Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https', :verify_mode => OpenSSL::SSL::VERIFY_NONE) do |http|
+        request = Net::HTTP::Get.new uri.request_uri
+        request.add_field "X-Api-Key", "#{@configuration["company"]["newrelic_api_key"]}"
+        response = http.request request
+        if response.code.to_f.between?(399,499)
+          catapult_exception("The New Relic API could not authenticate, please verify [\"company\"][\"newrelic_api_key\"] and [\"company\"][\"newrelic_license_key\"].")
+        elsif response.code.to_f.between?(500,600)
+          puts "   - The New Relic API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+        else
+          puts " * New Relic API authenticated successfully."
+          @api_cloudflare = JSON.parse(response.body)
         end
+      end
     end
     puts "\nVerification of configuration[\"environments\"]:\n".color(Colors::WHITE)
     # get full list of available digitalocean slugs to validate against
@@ -701,7 +694,7 @@ module Catapult
     # validate @configuration["environments"]
     @configuration["environments"].each do |environment,data|
       #validate digitalocean droplets
-      unless "#{environment}" == "dev"
+      unless "#{environment}" == "dev" || @api_digitalocean == nil
 
         # redhat droplet
         droplet = @api_digitalocean["droplets"].find { |element| element['name'] == "#{@configuration["company"]["name"].downcase}-#{environment}-redhat" }
@@ -840,75 +833,6 @@ module Catapult
               domain_tld_override_depth = instance["domain_tld_override"].split(".")
               if domain_tld_override_depth.count != 2
                 catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain_tld_override for websites => #{service} => domain => #{instance["domain"]} is invalid, it must only be one domain level (company.com)")
-              end
-            end
-            # monitor each production domain over http and https
-            uri = URI("http://monitor.us/api")
-            Net::HTTP.start(uri.host, uri.port) do |http|
-              request = Net::HTTP::Post.new uri.request_uri
-              request.body = URI::encode\
-                (""\
-                  "action=addExternalMonitor"\
-                  "&authToken=#{@api_monitorus_authtoken}"\
-                  "&apikey=#{@configuration["company"]["monitorus_api_key"]}"\
-                  "&interval=30"\
-                  "&locationIds=1,3"\
-                  "&name=http_#{instance["domain"]}"\
-                  "&tag=http_#{instance["domain"]}"\
-                  "&timestamp=#{Time.now.getutc}"\
-                  "&type=http"\
-                  "&url=#{instance["domain"]}"\
-                "")
-              response = http.request request # Net::HTTPResponse object
-              if response.code.to_f.between?(399,600)
-                puts "   - The monitor.us API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-              else
-                api_monitorus_monitor_http = JSON.parse(response.body)
-                # errorCode 11 => monitorUrlExists
-                if api_monitorus_monitor_http["status"] == "ok" || api_monitorus_monitor_http["errorCode"].to_f == 11
-                  puts "   - Configured monitor.us http monitor."
-                # errorCode 14 => The URL is not resolved.
-                elsif api_monitorus_monitor_http["errorCode"].to_f == 14
-                  puts "   - Could not add the monitor.us http monitor. The domain name is not registered."
-                elsif api_monitorus_monitor_http["error"].include?("out of limit")
-                  puts "   - monitor.us api limit of 1000 requests per hour has been hit, skipping for now."
-                else
-                  catapult_exception("Unable to configure monitor.us http monitor for websites => #{service} => domain => #{instance["domain"]}.")
-                end
-              end
-            end
-            uri = URI("http://monitor.us/api")
-            Net::HTTP.start(uri.host, uri.port) do |http|
-              request = Net::HTTP::Post.new uri.request_uri
-              request.body = URI::encode\
-                (""\
-                  "action=addExternalMonitor"\
-                  "&authToken=#{@api_monitorus_authtoken}"\
-                  "&apikey=#{@configuration["company"]["monitorus_api_key"]}"\
-                  "&interval=30"\
-                  "&locationIds=1,3"\
-                  "&name=https_#{instance["domain"]}"\
-                  "&tag=https_#{instance["domain"]}"\
-                  "&timestamp=#{Time.now.getutc}"\
-                  "&type=https"\
-                  "&url=#{instance["domain"]}"\
-                "")
-              response = http.request request # Net::HTTPResponse object
-              if response.code.to_f.between?(399,600)
-                puts "   - The monitor.us API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-              else
-                api_monitorus_monitor_https = JSON.parse(response.body)
-                # errorCode 11 => monitorUrlExists
-                if api_monitorus_monitor_https["status"] == "ok" || api_monitorus_monitor_https["errorCode"].to_f == 11
-                  puts "   - Configured monitor.us https monitor."
-                # errorCode 14 => The URL is not resolved.
-                elsif api_monitorus_monitor_https["errorCode"].to_f == 14
-                  puts "   - Could not add the monitor.us https monitor. The domain name is not registered."
-                elsif api_monitorus_monitor_https["error"].include?("out of limit")
-                  puts "   - monitor.us api limit of 1000 requests per hour has been hit, skipping for now."
-                else
-                  catapult_exception("Unable to configure monitor.us https monitor for websites => #{service} => domain => #{instance["domain"]}.")
-                end
               end
             end
           end
@@ -1300,10 +1224,9 @@ module Catapult
       puts "\n[http response codes]"
       puts " * 200 ok, 301 moved permanently, 302 found, 400 bad request, 401 unauthorized, 403 forbidden, 404 not found, 500 internal server error, 502 bad gateway, 503 service unavailable, 504 gateway timeout"
       puts " * http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html"
-      puts "\n[cert signature algorithm]"
-      puts " * https://www.openssl.org/docs/apps/ciphers.html"
+      puts " * Keep in mind these response codes and nslookups are from within your network - they may differ externally if you're running your own DNS server internally."
       puts "\nAvailable websites:".color(Colors::WHITE)
-      puts "".ljust(42) + "[software]".ljust(14) + "[alexa rank, 3m delta]".ljust(24) + "[dev.]".ljust(21) + "[test.]".ljust(21) + "[qc.]".ljust(21) + "[production / cert expiry, signature algorithm, common name]"
+      puts "".ljust(42) + "[software]".ljust(14) + "[workflow]".ljust(14) + "[dev.:80]".ljust(21) + "[test.:80]".ljust(21) + "[qc.:80]".ljust(21) + "[production:80]"
 
       @configuration["websites"].each do |service,data|
         if @configuration["websites"]["#{service}"] == nil
@@ -1324,39 +1247,8 @@ module Catapult
             end
             # get software
             row.push((instance["software"] || "").ljust(13))
-            # alexa rank and 3 month deviation
-            begin
-              if instance["domain_tld_override"] == nil
-                uri = URI("http://data.alexa.com/data?cli=10&url=#{instance["domain"]}")
-              else
-                uri = URI("http://data.alexa.com/data?cli=10&url=#{instance["domain"]}.#{instance["domain_tld_override"]}")
-              end
-              Net::HTTP.start(uri.host, uri.port) do |http|
-                request = Net::HTTP::Get.new uri.request_uri
-                response = http.request request
-                response = Nokogiri::XML(response.body)
-                if "#{response.xpath('//ALEXA//SD//POPULARITY')}" != ""
-                  response.xpath('//ALEXA//SD//POPULARITY').each do |attribute|
-                    row.push(attribute["TEXT"].to_s.reverse.gsub(/...(?=.)/,'\&,').reverse.ljust(11))
-                  end
-                else
-                  row.push("".ljust(11))
-                end
-                if "#{response.xpath('//ALEXA//SD//RANK')}" != ""
-                  response.xpath('//ALEXA//SD//RANK').each do |attribute|
-                    if attribute["DELTA"].match(/\+\d+/)
-                      operator = "+"
-                    elsif attribute["DELTA"].match(/\-\d+/)
-                      operator = "-"
-                    end
-                    delta = attribute["DELTA"].split(/[+,-]/)
-                    row.push("#{operator}#{delta[1].to_s.reverse.gsub(/...(?=.)/,'\&,').reverse}".ljust(11))
-                  end
-                else
-                  row.push("".ljust(11))
-                end
-              end
-            end
+            # get software workflow
+            row.push((instance["software_workflow"] || "").ljust(13))
             # get http response code per environment
             @configuration["environments"].each do |environment,data|
               response = nil
@@ -1422,38 +1314,6 @@ module Catapult
               rescue
                 row.push("down".ljust(15).color(Colors::RED))
               end
-            end
-            # ssl cert lookup
-            begin 
-              timeout(1) do
-                if instance["domain_tld_override"] == nil
-                  tcp_client = TCPSocket.new("#{instance["domain"]}", 443)
-                else
-                  tcp_client = TCPSocket.new("#{instance["domain"]}.#{instance["domain_tld_override"]}", 443)
-                end
-                ssl_context = OpenSSL::SSL::SSLContext.new
-                ssl_context.ssl_version = :TLSv1_2
-                ssl_client = OpenSSL::SSL::SSLSocket.new(tcp_client, ssl_context)
-                ssl_client.connect
-                cert = OpenSSL::X509::Certificate.new(ssl_client.peer_cert)
-                ssl_client.sysclose
-                tcp_client.close
-                #http://ruby-doc.org/stdlib-2.0/libdoc/openssl/rdoc/OpenSSL/X509/Certificate.html
-                date = Date.parse((cert.not_after).to_s)
-                row.push("#{date.strftime('%F')} #{cert.signature_algorithm} #{cert.subject.to_a.select{|name, _, _| name == 'CN' }.first[1]}".downcase.ljust(57))
-              end
-            rescue SocketError
-              row.push("down".ljust(57).color(Colors::RED))
-            rescue Errno::ECONNREFUSED
-              row.push("connection refused".ljust(57))
-            rescue Errno::ECONNRESET
-              row.push("connection reset".ljust(57))
-            rescue Timeout::Error
-              row.push("no 443 listener".ljust(57))
-            rescue OpenSSL::SSL::SSLError
-              row.push("cannot read cert, missing local cipher?".ljust(57))
-            rescue Exception => ex
-              row.push("#{ex.class}".ljust(57))
             end
             puts row.join(" ")
           end
