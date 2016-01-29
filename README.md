@@ -92,7 +92,7 @@ Methodology | SCRUM | :x:
 Workflow | Git Flow | Git Flow
 Environments | LocalDev, Test, QC, Production | Multidev, Dev, Test, Live
 Scaling | \*Resize | Smooth
-Development | Unlimited Local | 5 Cloud
+Development Environment | Unlimited Local | 5 Cloud
 Dashboard | CLI & **Web-based | Web-based
 Git | GitHub & Bitbucket | Proprietary
 DNS | CloudFlare | :x:
@@ -209,7 +209,7 @@ GitHub | Public Repositories | Free
 Amazon Web Services | Build Server | \*$0+
 Bamboo | Continuous Integration | $10
 **DNS:** | |
-CloudFlare | Cloud DNS | Free 
+CloudFlare | Cloud DNS | Free
 **Monitoring:** | |
 New Relic | Application, Browser, and Server Monitoring | Free
 **Total** | | $40+
@@ -239,7 +239,8 @@ New Relic | Application, Browser, and Server Monitoring | Free
         2. Sign in to your new AWS console https://console.aws.amazon.com
         3. Go to your AWS Identity and Access Management (IAM) Users Dashboard https://console.aws.amazon.com/iam/home#users
             1. Create a "Bamboo" user.
-            2. **Please note both the Access Key ID and Secret Access Key.**
+            2. Place the Access Key ID at `~/secrets/configuration.yml["company"]["aws_access_key"]`
+            3. Place the Secret Access Key at `~/secrets/configuration.yml["company"]["aws_secret_key"]`
         4. Go to your AWS Identity and Access Management (IAM) Groups Dashboard https://console.aws.amazon.com/iam/home#groups
             1. Create a "Bamboo" group.
             2. Attach the "AmazonEC2FullAccess" policy to the "Bamboo" group.
@@ -256,7 +257,7 @@ New Relic | Application, Browser, and Server Monitoring | Free
             1. Click Configuration from the left
             2. Click Edit configuration
                 1. **Amazon Web Services configuration**
-                    1. Set your AWS EC2 "Bamboo" Access Key ID and Secret Access Key
+                    1. Set your AWS EC2 "Bamboo" Access Key ID and Secret Access Key from `~/secrets/configuration.yml["company"]["aws_access_key"]` and `~/secrets/configuration.yml["company"]["aws_secret_key"]`
                     2. Region: `US East (Northern Virginia)`
                 2. **Automatic elastic instance management**
                     1. Elastic instance management: `Custom`
@@ -524,7 +525,7 @@ Once you Provision Websites and it's time to work on a website, there are a few 
 
 # Troubleshooting #
 
-Below is a list of known limitations with Catapult, if you're still having issues with Catapult, [submit a GitHub Issue](https://github.com/devopsgroup-io/catapult/issues/new).
+Below is a log of service related troubleshooting, if you're still having issues with Catapult, [submit a GitHub Issue](https://github.com/devopsgroup-io/catapult/issues/new).
 
 * **CloudFlare**
     * [07-27-2015] If your `~/secrets/configuration.yml["websites"]["apache/iis"]["domain"]` is a subdomain (drupal7.devopsgroup.io) the `force_https` option will only work in LocalDev and Production as CloudFlare only supports a first-level subdomain. https://www.cloudflare.com/ssl
