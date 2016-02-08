@@ -62,12 +62,32 @@ get-date
 $([System.TimeZone]::CurrentTimeZone.StandardName)
 
 
+echo "`n==> Importing PSWindowsUpdate"
+Remove-Item "C:\Windows\System32\WindowsPowerShell\v1.0\Modules\PSWindowsUpdate" -Force -Recurse
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory("c:\catapult\provisioners\windows\installers\PSWindowsUpdate.zip", "C:\Windows\System32\WindowsPowerShell\v1.0\Modules")
+Import-Module PSWindowsUpdate
+if (Get-Module -ListAvailable -Name PSWindowsUpdate) {
+    echo "PSWindowsUpdate loaded"
+} else {
+    echo "PSWindowsUpdate failed to load"
+}
+#Set-ExecutionPolicy RemoteSigned
+
+
+echo "`n==> Installing Windows Updates (This may take a while...)"
+# install latest updates
+Get-WUInstall -WindowsUpdate -AcceptAll
+echo "A reboot (LocalDev: vagrant reload) may be required after windows updates"
+# @todo check for reboot status
+
+
 echo "`n==> Installing .NET 4.0 (This may take a while...)"
 if (-not(Test-Path -Path "c:\windows\Microsoft.NET\Framework64\v4.0.30319\")) {
     # ((new-object net.webclient).DownloadFile("http://download.microsoft.com/download/9/5/A/95A9616B-7A37-4AF6-BC36-D6EA96C8DAAE/dotNetFx40_Full_x86_x64.exe","c:\tmp\dotNetFx40_Full_x86_x64.exe")) 
     start-process -filepath "c:\catapult\provisioners\windows\installers\dotNetFx40_Full_x86_x64.exe" -argumentlist "/q /norestart /log c:\catapult\provisioners\windows\logs\dotNetFx40_Full_x86_x64.exe.log" -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
     echo "Restarting Windows..."
-    echo "Please run 'vagrant provision windows' when it's back up"
+    echo "Please invoke 'vagrant provision' when it's back up"
     restart-computer -force
     exit 0
 }
@@ -75,6 +95,22 @@ Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP' -recurse |
 Get-ItemProperty -name Version,Release -EA 0 |
 Where { $_.PSChildName -match '^(?!S)\p{L}'} |
 Select PSChildName, Version, Release
+
+
+echo "`n==> Installing Web Platform Installer (This may take a while...)"
+# http://www.iis.net/learn/install/web-platform-installer/web-platform-installer-v4-command-line-webpicmdexe-rtw-release
+if (-not(Test-Path -Path "c:\Program Files\Microsoft\Web Platform Installer\WebpiCmd-x64.exe")) {
+    # https://github.com/fdcastel/psunattended/blob/master/PSUnattended.ps1
+    start-process -filepath msiexec -argumentlist "/i ""c:\catapult\provisioners\windows\installers\WebPlatformInstaller_amd64_en-US.msi"" /q ALLUSERS=1 REBOOT=ReallySuppress" -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+    get-content $provision
+    get-content $provisionError
+}
+
+
+echo "`n==> Installing URL Rewrite 2.0"
+start-process -filepath "c:\Program Files\Microsoft\Web Platform Installer\WebpiCmd-x64.exe" -argumentlist "/install /products:""UrlRewrite2"" /accepteula" -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+get-content $provision
+get-content $provisionError
 
 
 echo "`n==> Installing Git"
@@ -120,16 +156,47 @@ if (-not($config.websites.iis)) {
 
 } else {
 
-    # keep linux lf line endings instead of windows converting to crlf
+    # initialize id_rsa
+    new-item "c:\Program Files (x86)\Git\.ssh\id_rsa" -type file -force
+    get-content "c:\catapult\secrets\id_rsa" | add-content "c:\Program Files (x86)\Git\.ssh\id_rsa"
+
+    # initialize known_hosts
+    new-item "c:\Program Files (x86)\Git\.ssh\known_hosts" -type file -force
+    # ssh-keyscan bitbucket.org for a maximum of 10 tries
+    for ($i=0; $i -le 10; $i++) {
+        start-process -filepath "c:\Program Files (x86)\Git\bin\ssh-keyscan.exe" -argumentlist ("bitbucket.org") -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+        if ((get-content $provision) -match "bitbucket\.org") {
+            echo "ssh-keyscan for bitbucket.org successful"
+            get-content $provision | add-content "c:\Program Files (x86)\Git\.ssh\known_hosts"
+            break
+        } else {
+            echo "ssh-keyscan for bitbucket.org failed, retrying!"
+        }
+    }
+    # ssh-keyscan github.com for a maximum of 10 tries
+    for ($i=0; $i -le 10; $i++) {
+        start-process -filepath "c:\Program Files (x86)\Git\bin\ssh-keyscan.exe" -argumentlist ("github.com") -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+        if ((get-content $provision) -match "github\.com") {
+            echo "ssh-keyscan for github.com successful"
+            get-content $provision | add-content "c:\Program Files (x86)\Git\.ssh\known_hosts"
+            break
+        } else {
+            echo "ssh-keyscan for github.com failed, retrying!"
+        }
+    }
+
+    # keep linux lf (line feed) line endings instead of windows converting to crlf (carriage return line feed <- haha, typewriter)
     start-process -filepath "c:\Program Files (x86)\Git\bin\git.exe" -argumentlist ("config --global core.autocrlf false") -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
-    # clone/pull necessary repos
+
+    # clone/pull repositories into c:\inetpub\repositories\iis\
+    new-item -itemtype directory -force -path "c:\inetpub\repositories\iis\"
     foreach ($instance in $config.websites.iis) {
-        if (test-path ("c:\catapult\repositories\iis\{0}\.git" -f $instance.domain) ) {
-            start-process -filepath "c:\Program Files (x86)\Git\bin\git.exe" -argumentlist ("-C c:\catapult\repositories\iis\{0} pull origin {1}" -f $instance.domain,$config.environments.dev.branch) -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+        if (test-path ("c:\inetpub\repositories\{0}\.git" -f $instance.domain) ) {
+            start-process -filepath "c:\Program Files (x86)\Git\bin\git.exe" -argumentlist ("-C c:\inetpub\repositories\iis\{0} pull origin {1}" -f $instance.domain,$config.environments.$($args[0]).branch) -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
             get-content $provision
             get-content $provisionError
         } else {
-            start-process -filepath "c:\Program Files (x86)\Git\bin\git.exe" -argumentlist ("clone --recursive -b master {0} c:\catapult\repositories\iis\{1}" -f $instance.repo.replace("://",("://{0}:{1}@" -f $config.company.bitbucket_user,$config.company.bitbucket_user_password)),$instance.domain) -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
+            start-process -filepath "c:\Program Files (x86)\Git\bin\git.exe" -argumentlist ("clone --recursive --branch {1} {2} c:\inetpub\repositories\iis\{0}" -f $instance.domain,$config.environments.$($args[0]).branch,$instance.repo) -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
             get-content $provision
             get-content $provisionError
         }
@@ -164,45 +231,27 @@ if (-not($config.websites.iis)) {
         }
     }
 
-    echo "`n==> Removing net shares"
-    # iis cannot read from a vagrant synced folder, creating a net share gets around this. returnvalue: 0 is success.
-    if (get-wmiobject Win32_Share | where-object {$_.Name -ne "c$"}) {
-        $netshares = get-wmiobject Win32_Share | where-object {$_.Name -ne "c$"}
-        foreach ($netshare in $netshares) {
-            $netshare.Delete()
-        }
-    }
-
-    echo "`n==> Creating net shares"
-    foreach ($instance in $config.websites.iis) {
-        (get-wmiobject Win32_Share -List).Create(("c:\inetpub\repositories\iis\{0}" -f $instance.domain), ("{0}" -f $instance.domain), 0)
-    }
-
     echo "`n==> Creating application pools"
     foreach ($instance in $config.websites.iis) {
-        new-item ("IIS:\AppPools\dev.{0}" -f $instance.domain)
-        set-itemproperty ("IIS:\AppPools\dev.{0}" -f $instance.domain) managedRuntimeVersion v4.0
+        new-item ("IIS:\AppPools\$($args[0]).{0}" -f $instance.domain)
+        set-itemproperty ("IIS:\AppPools\$($args[0]).{0}" -f $instance.domain) managedRuntimeVersion v4.0
     }
 
     echo "`n==> Creating websites"
     foreach ($instance in $config.websites.iis) {
-        new-website -name ("dev.{0}" -f $instance.domain) -hostheader ("dev.{0}" -f $instance.domain) -port 80 -physicalpath ("\\localhost\{0}" -f $instance.domain) -ApplicationPool ("dev.{0}" -f $instance.domain) -force
-    }
+        if ($instance.webroot) {
+            $instance.webroot = $instance.webroot.Replace("/","\")
+        }
+        new-website -name ("$($args[0]).{0}" -f $instance.domain) -hostheader ("$($args[0]).{0}" -f $instance.domain) -port 80 -physicalpath ("c:\inetpub\repositories\iis\{0}\{1}" -f $instance.domain,$instance.webroot) -ApplicationPool ("$($args[0]).{0}" -f $instance.domain) -force
+   }
 
     echo "`n==> Starting websites"
     if (get-childitem -Path IIS:\Sites) {
         get-childitem -Path IIS:\Sites | foreach { start-website $_.Name; }
     }
-    echo ""
     foreach ($instance in $config.websites.iis) {
-        echo ("http://dev.{0}" -f $instance.domain)
+        echo ("http://$($args[0]).{0}" -f $instance.domain)
     }
-    echo ""
-
-    echo "`n==> Registering .NET 4.0 with IIS"
-    start-process -filepath "c:\windows\Microsoft.NET\Framework64\v4.0.30319\aspnet_regiis.exe" -argumentlist "-i" -Wait -RedirectStandardOutput $provision -RedirectStandardError $provisionError
-    get-content $provision
-    get-content $provisionError
 
 }
 
