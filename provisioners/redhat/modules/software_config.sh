@@ -116,11 +116,12 @@ fi
 # set ownership of user generated directories
 if [ "$software" = "codeigniter2" ]; then
     if [ -d "/var/www/repositories/apache/${domain}/${webroot}uploads" ]; then
-        echo -e "setting permissions for $software upload directory ~/uploads"
+        echo -e "setting permissions for $software upload and application directory ~/uploads ~/application"
         if [ "$1" != "dev" ]; then
             sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}uploads
+            sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}application
         fi
-        sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}uploads
+        sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}application
     fi
 elif [ "$software" = "codeigniter3" ]; then
     if [ -d "/var/www/repositories/apache/${domain}/${webroot}uploads" ]; then
