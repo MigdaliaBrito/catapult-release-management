@@ -121,6 +121,7 @@ if [ "$software" = "codeigniter2" ]; then
             sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}uploads
             sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}application
         fi
+        sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}uploads
         sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}application
     fi
 elif [ "$software" = "codeigniter3" ]; then
