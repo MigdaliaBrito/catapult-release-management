@@ -88,7 +88,7 @@ Platform Feature | Catapult | Pantheon | Acquia
 Source                              | Open                           | Closed                    | Closed
 Feature Set                         | Bundled                        | Separated                 | Separated
 Minimum Bundled<br>Monthly Cost     | $40                            | $400                      | $134
-Methodology                         | SCRUM                          | :x:                       | :x:
+Methodology                         | Scrum                          | :x:                       | :x:
 Workflow                            | Git Flow                       | Git Flow                  | Git Flow
 Workflow Model                      | Upstream or Downstream         | :x:                       | :x:
 Environments                        | LocalDev, Test, QC, Production | Multidev, Dev, Test, Live | Dev Desktop, Dev, Stage, Prod
@@ -118,7 +118,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io
     - [Supported Software](#supported-software)
     - [Competition](#competition)
     - [Table of Contents](#table-of-contents)
-- [Setup Catapult](#setup-catapults)
+- [Setup Catapult](#setup-catapult)
     - [Developer Setup](#developer-setup)
     - [Instance Setup](#instance-setup)
     - [Services Setup](#services-setup)
@@ -126,7 +126,8 @@ See an error or have a suggestion? Email competition@devopsgroup.io
     - [Provision Environments](#provision-environments)
     - [Configure Automated Deployments](#configure-automated-deployments)
 - [Release Management](#release-management)
-    - [Website Configuration](#website-configuration)
+    - [Catapult Configuration](#catapult-configuration)
+        - [Websites](#websites)
     - [Website Development](#website-development)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -452,6 +453,9 @@ Environment | LocalDev | Test | QC | Production
 ------------|----------|------|----|-----------
 **Running Branch**                       | *develop*                                                   | *develop*                                                         | *release*                                                      | *master*
 **Deployments**                          | Manually via `vagrant provision`                            | Automatically via Bamboo (new commits to **develop**)             | Automatically via Bamboo (new commits to **release**)          | Manually via Bamboo
+**Testing Activities**                   | Component Test                                              | Integration Test, System Test                                     | Acceptance Test, Release Test                                  | Operational Qualification
+**Scrum Activity**                       | Sprint Start: Development of User Stories                   | Daily Scrum                                                       | Sprint Review                                                  | Sprint End: Accepted Product Release
+**Scrum Roles**                          | Development Team                                            | Scrum Master, Development Team, Product Owner (optional)          | Scrum Master, Development Team, Product Owner                  | Product Owner
 **Downstream Workflow - Database**       | Restore from **develop** ~/_sql folder of website repo      | Restore from **develop** ~/_sql folder of website repo            | Restore from **release** ~/_sql folder of website repo         | Backup to **develop** ~/_sql folder of website repo during deploy
 **Upstream Workflow - Database**         | Restore from **develop** ~/_sql folder of website repo      | Backup to **develop** ~/_sql folder of website repo during deploy | Restore from **release** ~/_sql folder of website repo         | Restore from **master** ~/_sql folder of website repo
 **Downstream Workflow - Software Files** | rsync files from **Production** if untracked                | rsync files from **Production** if untracked                      | rsync files from **Production** if untracked                   | --
@@ -459,7 +463,11 @@ Environment | LocalDev | Test | QC | Production
 
 
 
-## Website Configuration ##
+## Catapult Configuration ##
+
+
+
+### Websites ###
 
 Adding websites to Catapult is easy. The only requirement is that the website needs to be contained in its own repo at GitHub or Bitbucket. Websites are then added to configuration.yml, a minimal addition looks like this:
 
