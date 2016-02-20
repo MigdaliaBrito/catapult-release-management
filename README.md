@@ -91,16 +91,17 @@ Workflow                            | Git Flow                       | Git Flow 
 Workflow Model                      | Upstream or Downstream         | :x:                       | :x:
 Environments                        | LocalDev, Test, QC, Production | Multidev, Dev, Test, Live | Dev Desktop, Dev, Stage, Prod
 Approach                            | Virtual Machine                | Container                 | Virtual Machine
-Data Center                         | DigitalOcean                   | Rackspace                 | AWS
-Scaling                             | \*Resize                       | Smooth                    | Resize
+Data Center                         | DigitalOcean and AWS           | Rackspace                 | AWS
+Scaling                             | Vertical                       | Horizontal                | Vertical
+Scaling Management                  | *Manual                        | Automatic                 | Manual
 Development Environment             | Unlimited Local                | 5 Cloud                   | Unlimited Local
 Development Environment<br>Approach | Exact                          | Exact                     | Similar
 Dashboard - Control                 | CLI                            | CLI & Web                 | CLI & Web
 Dashboard - Monitor                 | CLI & \*Web                    | CLI & Web                 | CLI & Web
 Git                                 | GitHub & Bitbucket             | Proprietary               | Proprietary 
-DNS Management                      | CloudFlare                     | :x:                       | :x: 
-HTTPS                               | Free                           | $30/mo + $cert            | $cert
-Monitoring                          | New Relic                      | Proprietary               | Proprietary
+Managed DNS                         | CloudFlare                     | :x:                       | :x: 
+Managed HTTPS                       | Free                           | $30/mo + $cert            | $cert
+Managed Monitoring                  | New Relic                      | Proprietary               | Proprietary
 Supported Software                  | Numerous                       | 2                         | 1
 
 \* Catapult introduces new features on a regular basis - this feature is highlighted as a milestone for future release.
@@ -129,6 +130,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io
         - [Environments](#environments)
         - [Websites](#websites)
     - [Website Development](#website-development)
+    - [Performance Testing](#performance-testing)
     - [Disaster Recovery](#disaster-recovery)
         - [Server Rebuilding](#server-rebuilding) 
         - [Website Rollbacks](#website-rollbacks) 
@@ -153,6 +155,7 @@ Catapult is controlled via Vagrant and the command line of a Developer's compute
 
 1. **Vagrant**
     1. Please download and install from https://www.vagrantup.com/downloads.html
+    2. Using OSX ? Please ensure Xcode Command Line Tools are installed by running `xcode-select --install` from Terminal
 2. **VirtualBox**
     1. Please download and install from https://www.virtualbox.org/wiki/Downloads
 3. **SourceTree**
@@ -236,6 +239,7 @@ New Relic | Application, Browser, and Server Monitoring | Free
             1. Add a new SSH Key named "Vagrant" with your newly created id_rsa.pub from ~/secrets/id_rsa.pub key 
     2. **Amazon Web Services** (AWS) sign-up and configuration
         1. Create an account https://portal.aws.amazon.com/gp/aws/developer/registration
+            * [Free Stuff] Receive Free Tier benefits for the first 12 months after signing up https://aws.amazon.com/ec2/pricing/
         2. Sign in to your new AWS console https://console.aws.amazon.com
         3. Go to your AWS Identity and Access Management (IAM) Users Dashboard https://console.aws.amazon.com/iam/home#users
             1. Create a "Catapult" user.
@@ -498,7 +502,7 @@ The Company section contains globally used credentials and company information -
 
 ### Environments ###
 
-The Company section contains environment configuration such as IP addresses and system credentials - most of which are automatically set during [Setup Catapult](#setup-catapult) and [Setup Environments](#setup-environments).
+The Environments section contains environment configuration such as IP addresses and system credentials - all of which are automatically set during [Setup Catapult](#setup-catapult) and [Setup Environments](#setup-environments).
 
 
 
@@ -629,6 +633,18 @@ The importance of a LocalDev environment is critical to reducing risk by exactin
 * Repositories for websites are cloned into the Catapult instance at ~/repositories and in the respective apache or iis folder, listed by domain name.
 * Repositories are linked between the host and guest for realtime developing.
 * Need a fresh database backup? Just delete and commit today's backup from the ~/sql folder.
+
+
+
+## Performance Testing ##
+
+Often disregarded, performance testing is a key step in ensuring 100% uptime and an excellent user experience. ApacheBench is a great tool to test request performance and concurrency - OSX includes ApacheBench out of the box, see [this StackOverflow](http://stackoverflow.com/a/7407602/4838803) post to get up and running on Windows.
+
+ApacheBench enables us to profile requests `-n` (number of requests to perform) and concurrency `-c` (number of multiple requests to make at a time) to test for [C10k and C10M](http://highscalability.com/blog/2013/5/13/the-secret-to-10-million-concurrent-connections-the-kernel-i.html). An example command looks like this:
+````
+ab -n 1000 -c 100 http://test.devopsgroup.io/
+````
+Keep bumping up `-n` and `-c` and notate failed requests and requests per second.
 
 
 
