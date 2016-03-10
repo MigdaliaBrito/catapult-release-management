@@ -16,10 +16,9 @@
 * Why is this costing so much?
 * Are my environments safe? 
 * Is my website backed up?
+* How quickly can I recover my website after a disaster?
 * Can I easily scale my website for more traffic?
 * What is my uptime?
-
-<br>
 
 **What makes Catapult different?**
 
@@ -144,6 +143,8 @@ See an error or have a suggestion? Email competition@devopsgroup.io
         - [Websites](#websites)
     - [Website Development](#website-development)
     - [Performance Testing](#performance-testing)
+        - [Website Concurrency Maxiumum](#website-concurrency-maximum)
+        - [Interpreting Apache AB Results](#interpreting-apache-ab-results)
     - [Disaster Recovery](#disaster-recovery)
         - [Server Rebuilding](#server-rebuilding) 
         - [Website Rollbacks](#website-rollbacks) 
@@ -176,9 +177,9 @@ Catapult is controlled via Vagrant and the command line of a Developer's compute
 4. **Sublime Text 3**
     1. Please download and install from http://www.sublimetext.com/3
 5. **GPG2**
-    1. Using OSX ? Please download and install GPG Suite https://gpgtools.org
-    2. Using Windows? Please download and install Gpg4win from http://gpg4win.org/download.html
-
+    1. Using OSX? Please download and install GPG Suite https://gpgtools.org
+    2. Using Linux? If being prompted by the Passphrase GUI Agent, comment out 'use-agent' in ~/.gnupg/gpg.conf
+    3. Using Windows? Please download and install Gpg4win from http://gpg4win.org/download.html
 
 
 ## Instance Setup ##
@@ -689,13 +690,60 @@ Performing development in a local environment is critical to reducing risk by ex
 
 Often disregarded, performance testing is a crucial component of quality assurance. The risks of neglecting performance testing include downtime, SEO impacts, gaps in analytics, poor user experience, and unknown ability to scale.
 
-With Catapult's exactly duplicated configuration, even the Test environment can accurately represent the performance potential of the Production environment. ApacheBench is a powerful tool to test request performance and concurrency - OSX includes ApacheBench out of the box, while [this StackOverflow post](http://stackoverflow.com/a/7407602/4838803) details how to get up and running on Windows.
+With Catapult's exactly duplicated configuration, even the Test environment can accurately represent the performance potential of the Production environment. [ApacheBench](https://httpd.apache.org/docs/2.4/programs/ab.html) is a powerful tool to test request performance and concurrency - OSX includes ApacheBench out of the box, while [this StackOverflow post](http://stackoverflow.com/a/7407602/4838803) details how to get up and running on Windows.
 
-ApacheBench enables us to profile request performance (`-n` represents the number of requests to perform) and concurrency (`-c` represents the number of multiple requests to make at a time) to test for performance, including common limits such as [C10k and C10M](http://highscalability.com/blog/2013/5/13/the-secret-to-10-million-concurrent-connections-the-kernel-i.html). An example command looks like this:
+ApacheBench enables us to profile request performance (`-n` represents the number of requests to perform) and concurrency (`-c` represents the number of multiple requests to make at a time) to test for performance, including common limits such as [C10k and C10M](http://highscalability.com/blog/2013/5/13/the-secret-to-10-million-concurrent-connections-the-kernel-i.html).
+
+### Website Concurrency Maxiumum ###
+
+Using a website with historical Google Analytics data, access the Audience Overview and find the busiest Pageview day from the past 30-days and then drill into that date. Find the hour with the most Pageviews, then the accompanying Avg. Session Duration. Using the following formula, we are able to find the Concurrency Maxiumum.
+
+*(Pageviews x Avg. Session Duration - in seconds) / 3,600 seconds* = **Concurrency Maxiumum**
+
+Take a website with an average of 500 pageviews per hour, or 365,000 pageviews per month, which has a busiest hour of 1,000 pageviews.
+
+Pageviews | Avg. Session Duration | Total Session Seconds | Concurrency Maxiumum
+----------|-----------------------|-----------------------|---------------------
+1,000 | 60 minutes (3,600 seconds) | 3,600,000 | **1,000**
+1,000 | 10 minutes (600 seconds) | 600,000 | **166**
+1,000 | 5 minutes (300 seconds) | 300,000 | **88**
+1,000 | 1 minute (60 seconds) | 60,000 | **16**
+
+**100 concurrent requests performed 10 times**
 ````
-ab -n 1000 -c 100 http://test.devopsgroup.io/
+ab -l -r -n 1000 -c 100 -H "Accept-Encoding: gzip, deflate" http://test.devopsgroup.io/
 ````
-Notate failed requests and requests per second while incrementing `-n` and `-c` values.
+
+Take a website with an average of 20 pageviews per hour, or 14,600 pageviews per month, which has a busiest hour of 100 pageviews.
+
+Pageviews | Avg. Session Duration | Total Session Seconds | Concurrency Maxiumum
+----------|-----------------------|-----------------------|---------------------
+100 | 60 minutes (3,600 seconds) | 36,000 | **1,000**
+100 | 10 minutes (600 seconds) | 60,000 | **16**
+100 | 5 minutes (300 seconds) | 30,000 | **8**
+100 | 1 minute (60 seconds) | 6,000 | **1.6**
+
+**10 concurrent requests performed 10 times**
+````
+ab -l -r -n 100 -c 10 -H "Accept-Encoding: gzip, deflate" http://test.devopsgroup.io/
+````
+
+### Interpreting Apache AB Results ###
+
+Using a satisifed [Apdex](https://en.wikipedia.org/wiki/Apdex) of 7 seconds, we can see that 98% of users would be satisfied.
+
+````
+Percentage of the requests served within a certain time (ms)
+  50%     19
+  66%     21
+  75%     24
+  80%     27
+  90%     34
+  95%   3968
+  98%   6127
+  99%   7227
+ 100%   7325 (longest request)
+````
 
 
 
@@ -740,7 +788,6 @@ Below is a log of service related troubleshooting. If you're having issues relat
     * [09-08-2015] Some database dumps exceed 100MB, so it's recommened to use Bitbucket in those instances as Catapult auto-commits database dumps to your website's repository, up to 500MB worth of database dumps or the one, newest database dump. [Bitbucket](https://help.github.com/articles/what-is-my-disk-quota/) has a 2GB hard repo push limit with no documented file limit and [GitHub](https://help.github.com/articles/what-is-my-disk-quota/) has a 1GB soft repo limit with a 100MB file size limit.
 * **Vagrant**
    * [02-04-2015] When upgrading Vagrant you may run into errors - the most common issue are mismatched plugins, running this command has a good chance of success `sudo rm -Rf ~/.vagrant.d/gems/ && sudo rm ~/.vagrant.d/plugins.json`
-
 
 
 # Contributing #
