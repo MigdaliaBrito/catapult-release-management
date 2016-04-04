@@ -102,6 +102,7 @@ Minimum Bundled<br>Monthly Cost               | $40                            |
 Managed Workflow                              | Git Flow                       | :x:                           | :x:
 Managed Workflow Model                        | Upstream or Downstream         | :x:                           | :x:
 Agile Methodology Focus                       | Scrum                          | :x:                           | :x:
+Managed Continuous Integration                | :white_check_mark:             | :x:                           | :x:
 Environments                                  | LocalDev, Test, QC, Production | Multidev, Dev, Test, Live     | Dev Desktop, Dev, Stage, Prod
 Exacting Configuration                        | :white_check_mark:             | :x:<sup>[2](#references)</sup>| :x:<sup>[3](#references)</sup>
 Approach                                      | Virtual Machine                | Container                     | Virtual Machine
@@ -150,6 +151,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io - we appreci
         - [Forcing www](#forcing-www)
         - [Refreshing Databases](#refreshing-databases)
         - [Connecting to Databases](#connecting-to-databases)
+        - [Hotfixes](#hotfixes)
     - [Performance Testing](#performance-testing)
         - [Website Concurrency Maxiumum](#website-concurrency-maximum)
         - [Interpreting Apache AB Results](#interpreting-apache-ab-results)
@@ -160,6 +162,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io - we appreci
     - [Cloud Compliance](#cloud-compliance)
     - [Self Compliance](#self-compliance)
     - [HTTPS and SSL Certificates](#https-and-ssl-certificates)
+    - [Security Breach Notification Laws](#security-breach-notification-laws)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
     - [Releases](#releases)
@@ -730,6 +733,37 @@ Performing development in a local environment is critical to reducing risk by ex
         * Then add a New Connection with the respective environment's mysql user values in `~/secrets/configuration.yml`.
             * The hostname will be localhost since we are forwarding the port through our local SSH tunnel.
 
+### Hotfixes ###
+Always weigh the risk of *not performing* a hotfix versus *performing* it, as hotfixes require going outside of the normal development and testing workflow. Performing a hotfix varies depending on the website's `software` type, `software_workflow` direction, and type of change (code or database).
+* `software_workflow: downstream`
+    * **Code**
+        1. In `~/configuration.yml`, temporarily set the environments -> dev -> branch key to `branch: master`, and do not commit the change
+        2. Provision any related LocalDev servers
+        3. Develop, test, then commit any changes directly to the `master` branch
+        4. Run the Production Bamboo build and verify the release
+        5. Create a pull request and merge the `master` branch into the `develop` branch
+        6. Set the environments -> dev -> branch key back to `branch: develop`
+        7. Provision any related LocalDev servers
+    * **Database**
+        * Login to the Production website and make the change
+            * (any database change that is beyond the direct capability of the `software` should not be taken out as a hotfix)
+* `software_workflow: upstream`
+    * **Code**
+        1. In `~/configuration.yml`, temporarily set the environments -> dev -> branch key to `branch: master`, and do not commit the change
+        2. Provision any related LocalDev servers
+        3. Develop, test, then commit any changes directly to the `master` branch
+        4. Run the Production build and verify the release
+        5. Create a pull request and merge the `master` branch into the `develop` branch
+        6. Set the environments -> dev -> branch key back to `branch: develop`
+        7. Provision any related LocalDev servers
+    * **Database**
+        1. Login to the Production *and* Test website and make the change
+            * (any database change that is beyond the direct capability of logging into the `software` and safely making the change, should not be taken out as a hotfix)
+        2. From LocalDev and the `develop` branch of the website's repository, commit a deletion of today's (if exists) SQL dump file from within the `~/sql` folder
+            * (this ensures there is a known committed SQL dump of your change to the `develop` branch for when this branch is merged upstream)
+        3. From LocalDev, temporarily checkout the `master` branch of the website's repository, make your change in the most recent SQL dump file from within the `~/sql` folder
+            * (this ensures that during the next Production build your change is not overwritten)
+
 
 
 ## Performance Testing ##
@@ -868,9 +902,13 @@ Issuing Criteria: Organization Legal Existence | :x:                            
 Industry Accepted Issuing Standard             | :x:                                                                                          | :x:                                                                                         | [CAB EV SSL Certificate Guidelines](https://cabforum.org/extended-validation/)
 Standard Browser Padlock                       | :white_check_mark:                                                                           | :white_check_mark:                                                                          | :x:
 Greenbar Browser Padlock                       | :x:                                                                                          | :x:                                                                                         | :white_check_mark:
-Browser Compatability                          | Google Chrome 1+<br>Mozilla Firefox 1+<br>Internet Explorer 5+                               | Google Chrome 1+<br>Mozilla Firefox 1+<br>Internet Explorer 5+                              | Google Chrome 1+<br>Mozilla Firefox 3+<br>Internet Explorer 7+
+Browser Compatibility                          | Google Chrome 1+<br>Mozilla Firefox 1+<br>Internet Explorer 5+                               | Google Chrome 1+<br>Mozilla Firefox 1+<br>Internet Explorer 5+                              | Google Chrome 1+<br>Mozilla Firefox 3+<br>Internet Explorer 7+
 
-See an error or have a suggestion? Email security@devopsgroup.io - we appreciate all feedback.
+## Security Breach Notification Laws ##
+
+Catapult introduces many best practice security measures, however, security of customer data is ultimately your responsibility. Generally speaking, if personal information is compromised, you are required by law to notify the party. Personal information, in the United States, is generally classified as **an individual's first and last name in combination with a Social Security number, driver's license number, or financial account number**. Laws vary country-by-country and state-by-state - for more information please see [this list](http://www.itgovernanceusa.com/data-breach-notification-laws.aspx) of data breach laws by U.S. state compiled by IT Governence.
+
+See an error or have a suggestion? Email security@devopsgroup.io if confidential or submit a pull request - we appreciate all feedback.
 
 
 
