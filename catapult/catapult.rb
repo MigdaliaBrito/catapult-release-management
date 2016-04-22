@@ -70,7 +70,9 @@ module Catapult
         puts "\n"
         puts "Please correct the error then re-run your vagrant command."
         puts "See https://github.com/devopsgroup-io/catapult for more information."
-        File.delete('.lock')
+        if File.exist?('.lock')
+          File.delete('.lock')
+        end
         exit 1
       end
     end
@@ -83,17 +85,21 @@ module Catapult
 
 
     # set variables based on operating system
+    # windows
     if (RbConfig::CONFIG['host_os'] =~ /mswin|msys|mingw|cygwin|bccwin|wince|emc/)
       if File.exist?('C:\Program Files (x86)\Git\bin\git.exe')
         @git = "\"C:\\Program Files (x86)\\Git\\bin\\git.exe\""
+      elsif File.exist?('C:\Program Files\Git\bin\git.exe')
+        @git = "\"C:\\Program Files\\Git\\bin\\git.exe\""
       else
-        catapult_exception("Git is not installed at C:\\Program Files (x86)\\Git\\bin\\git.exe")
+        catapult_exception("Git is not installed at C:\\Program Files (x86)\\Git\\bin\\git.exe or C:\\Program Files\\Git\\bin\\git.exe")
       end
       begin
          require "Win32/Console/ANSI"
       rescue LoadError
          catapult_exception('win32console is not installed, please run "gem install win32console"')
       end
+    # others
     elsif (RbConfig::CONFIG['host_os'] =~ /darwin|mac os|linux|solaris|bsd/)
       @git = "git"
     else
@@ -246,6 +252,8 @@ module Catapult
 
     if File.exist?(\'C:\Program Files (x86)\Git\bin\git.exe\')
       git = "\"C:\\Program Files (x86)\\Git\\bin\\git.exe\""
+    elsif File.exist?(\'C:\Program Files\Git\bin\git.exe\')
+      git = "\"C:\\Program Files\\Git\\bin\\git.exe\""
     else
       git = "git"
     end
@@ -398,7 +406,6 @@ module Catapult
     if $?.exitstatus > 0
       catapult_exception("Your configuration could not be decrypted, please confirm your team's gpg_key is correct in secrets/configuration-user.yml")
     end
-    configuration_example = YAML.load_file("secrets/configuration.yml.template")
     `gpg --verbose --batch --yes --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --output secrets/id_rsa --decrypt secrets/id_rsa.gpg`
     if $?.exitstatus > 0
       catapult_exception("Your configuration could not be decrypted, please confirm your team's gpg_key is correct in secrets/configuration-user.yml")
@@ -407,6 +414,8 @@ module Catapult
     if $?.exitstatus > 0
       catapult_exception("Your configuration could not be decrypted, please confirm your team's gpg_key is correct in secrets/configuration-user.yml")
     end
+    # load provisioners yaml file
+    @provisioners = YAML.load_file("provisioners/provisioners.yml")
 
 
 
@@ -1279,8 +1288,13 @@ module Catapult
           puts "   - Configured Bamboo service for automated deployments."
           # validate software
           unless instance["software"] == nil
-            unless ["codeigniter2","codeigniter3","drupal6","drupal7","silverstripe","wordpress","xenforo"].include?("#{instance["software"]}")
-              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be one of the following [\"codeigniter2\",\"drupal6\",\"drupal7\",\"wordpress\",\"xenforo\"].")
+            # create an array of available software
+            provisioners_software = Array.new
+            unless @provisioners["software"]["#{service}"] == nil
+              @provisioners["software"]["#{service}"].each { |i, v| provisioners_software.push(i) }
+            end
+            unless provisioners_software.include?("#{instance["software"]}")
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be one of the following #{provisioners_software.join(", ")}.")
             end
             unless ["downstream","upstream"].include?("#{instance["software_workflow"]}")
               catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software for websites => #{service} => domain => #{instance["domain"]} requires the software_workflow option, it must be one of the following [\"downstream\",\"upstream\"].")
@@ -1417,7 +1431,7 @@ module Catapult
               rescue OpenSSL::SSL::SSLError
                 row.push("err".ljust(4).color(Colors::RED))
               rescue Exception => ex
-                row.push("#{ex.class}".ljust(4).color(Colors::RED))
+                row.push("#{ex.class}".slice!(0, 4).ljust(4).color(Colors::RED))
               end
               # nslookup production top-level domain
               begin
