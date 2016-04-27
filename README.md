@@ -150,6 +150,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io - we appreci
     - [Website Development](#website-development)
         - [Website Repositories](#website-repositories)
         - [Forcing www](#forcing-www)
+        - [Database Migrations](#database-migrations)
         - [Refreshing Databases](#refreshing-databases)
         - [Connecting to Databases](#connecting-to-databases)
         - [Hotfixes](#hotfixes)
@@ -525,17 +526,19 @@ Catapult follows Gitflow for its configuration and development model - each envi
 
 Environment | LocalDev | Test | QC | Production
 ------------|----------|------|----|-----------
-**Running Branch**                              | *develop*                                                   | *develop*                                                         | *release*                                                      | *master*
-**Deployments**                                 | Manually via `vagrant provision`                            | Automatically via Bamboo (new commits to **develop**)             | Automatically via Bamboo (new commits to **release**)          | Manually via Bamboo
-**Testing Activities**                          | Component Test                                              | Integration Test, System Test                                     | Acceptance Test, Release Test                                  | Operational Qualification
-**Scrum Activity**                              | Sprint Start: Development of User Stories                   | Daily Scrum                                                       | Sprint Review                                                  | Sprint End: Accepted Product Release
-**Scrum Roles**                                 | Development Team                                            | Scrum Master, Development Team, Product Owner (optional)          | Scrum Master, Development Team, Product Owner                  | Product Owner
-**Downstream Software Workflow - Database**     | Restore from **develop** ~/_sql folder of website repo      | Restore from **develop** ~/_sql folder of website repo            | Restore from **release** ~/_sql folder of website repo         | Backup to **develop** ~/_sql folder of website repo during deploy
-**Upstream Software Workflow - Database**       | Restore from **develop** ~/_sql folder of website repo      | Backup to **develop** ~/_sql folder of website repo during deploy | Restore from **release** ~/_sql folder of website repo         | Restore from **master** ~/_sql folder of website repo
-**Downstream Software Workflow - File Store**   | rsync files from **Production** if git untracked            | rsync files from **Production** if git untracked                  | rsync files from **Production** if git untracked               | --
-**Upstream Software Workflow - File Store**     | rsync files from **Test** if git untracked                  | --                                                                | rsync files from **Test** if git untracked                     | rsync files from **Test** if git untracked
+**Running Branch**                                       | *develop*                                                   | *develop*                                                                                                    | *release*                                                      | *master*
+**Deployments**                                          | Manually via `vagrant provision`                            | Automatically via Bamboo (new commits to **develop**)                                                        | Automatically via Bamboo (new commits to **release**)          | Manually via Bamboo
+**Testing Activities**                                   | Component Test                                              | Integration Test, System Test                                                                                | Acceptance Test, Release Test                                  | Operational Qualification
+**Scrum Activity**                                       | Sprint Start: Development of User Stories                   | Daily Scrum                                                                                                  | Sprint Review                                                  | Sprint End: Accepted Product Release
+**Scrum Roles**                                          | Development Team                                            | Scrum Master, Development Team, Product Owner (optional)                                                     | Scrum Master, Development Team, Product Owner                  | Product Owner
+**Downstream Software Workflow - Database**              | Restore from **develop** ~/_sql folder of website repo      | Restore from **develop** ~/_sql folder of website repo                                                       | Restore from **release** ~/_sql folder of website repo         | Auto-commit one backup per day (up to 500MB or 1) to **master** ~/_sql folder of website repo during deploy
+**Downstream Software Workflow - Untracked File Stores** | rsync file stores from **Production**                       | rsync file stores from **Production**                                                                        | rsync file stores from **Production**                          | Pull file stores from **master**
+**Downstream Software Workflow - Tracked File Stores**   | Pull file stores from **develop**                           | Pull file stores from **develop**                                                                            | Pull file stores from **release**                              | Auto-commit file stores (up to 750MB each) to **master** of website repo during deploy
+**Upstream Software Workflow - Database**                | Restore from **develop** ~/_sql folder of website repo      | Auto-commit one backup per day (up to 500MB or 1) to **develop** ~/_sql folder of website repo during deploy | Restore from **release** ~/_sql folder of website repo         | Restore from **master** ~/_sql folder of website repo
+**Upstream Software Workflow - Untracked File Stores**   | rsync file stores from **Test**                             | Pull file stores from **develop**                                                                            | rsync file stores from **Test**                                | rsync file stores from **Test**
+**Upstream Software Workflow - Tracked File Stores**     | Pull file stores from **develop**                           | Auto-commit file stores (up to 750MB each) to **develop** of website repo during deploy                      | Pull file stores from **release**                              | Pull file stores from **master**
 
-
+**NOTE:** Catapult will automatically pull **master** into **develop** when in the **Downstream Software Workflow** direction.
 
 ## Catapult Configuration ##
 
@@ -619,28 +622,34 @@ The following options are available:
     * required: no
     * `software: codeigniter2`
         * maintains codeigniter2 database config file ~/application/config/database.php
+        * commits git tracked ~/uploads
         * rsyncs git untracked ~/uploads
         * sets permissions for ~/uploads
+        * invokes `php index.php migrate`
         * dumps and restores database at ~/_sql
         * updates url references in database
     * `software: codeigniter3`
         * maintains codeigniter3 database config file ~/application/config/database.php
+        * commits git tracked ~/uploads
         * rsyncs git untracked ~/uploads
         * sets permissions for ~/uploads
+        * invokes `php index.php migrate`
         * dumps and restores database at ~/_sql
         * updates url references in database
     * `software: drupal6`
         * maintains drupal6 database config file ~/sites/default/settings.php
+        * commits git tracked ~/sites/default/files
         * rsyncs git untracked ~/sites/default/files
-        * sets permissions for ~/sites/default/files
+        * sets permissions for ~/sites/default
         * invokes `drush updatedb`
         * dumps and restores database at ~/_sql
         * updates url references in database
         * resets drupal6 admin password
     * `software: drupal7`
         * maintains drupal7 database config file ~/sites/default/settings.php
+        * commits git tracked ~/sites/default/files
         * rsyncs git untracked ~/sites/default/files
-        * sets permissions for ~/sites/default/files
+        * sets permissions for ~/sites/default
         * invokes `drush updatedb`
         * dumps and restores database at ~/_sql
         * updates url references in database
@@ -651,14 +660,16 @@ The following options are available:
         * updates url references in database
     * `software: wordpress`
         * maintains wordpress database config file ~/wp-config.php
+        * commits git tracked ~/wp-content/uploads
         * rsyncs git untracked ~/wp-content/uploads
-        * sets permissions for ~/wp-content/uploads
+        * sets permissions for ~/wp-content
         * invokes `wp-cli core update-db`
         * dumps and restores database at ~/_sql
         * updates url references in database
         * resets wordpress admin password
     * `software: xenforo`
         * maintains xenForo database config file ~/library/config.php
+        * commits git tracked ~/data and ~/internal_data
         * rsyncs git untracked ~/data and ~/internal_data
         * sets permissions for ~/data and ~/internal_data
         * dumps and restores database at ~/_sql
@@ -673,10 +684,10 @@ The following options are available:
     * required: yes
     * dependency: `software:`
     * `software_workflow: downstream`
-        * specifies Production as the source for the database and software file store
+        * specifies Production as the source for the database and software file stores
         * this option is useful for maintaining a website
     * `software_workflow: upstream`
-        * specifies Test as the source for the database and software file store
+        * specifies Test as the source for the database and software file stores
         * this option is useful for launching a new website
         * PLEASE NOTE: affects the Production website instance - see [Release Management](#release-management)
 * `webroot:`
@@ -693,26 +704,43 @@ Performing development in a local environment is critical to reducing risk by ex
 
 ### Website Repositories ###
 
-* Repositories for websites are cloned into the Catapult instance at ~/repositories and in the respective apache or iis folder, listed by domain name.
-    * Repositories are linked between the host and guest for realtime development.
+Repositories for websites are cloned into the Catapult instance at ~/repositories and in the respective apache or iis folder, listed by domain name.
+
+* Repositories are linked between the host and guest for realtime development.
 
 ### Forcing www ###
 
-* Forcing www is software specific, unlike forcing the https protocol, which is environment specific and driven by the `force_https` option. To force www ([why force www?](http://www.yes-www.org/)), please follow the respective guides per `software`:
-    * `software: codeigniter2`
-        * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
-    * `software: codeigniter3`
-        * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
-    * `software: drupal6`
-        * `~/.htaccess` https://github.com/drupal/drupal/blob/6.x-18-security/.htaccess#L87
-    * `software: drupal7`
-        * `~/.htaccess` https://github.com/drupal/drupal/blob/7.x/.htaccess#L89
-    * `software: silverstripe`
-        * `~/mysite/_config.php` no official documentation - http://www.ssbits.com/snippets/2010/a-config-php-cheatsheet/
-    * `software: wordpress`
-        * http://codex.wordpress.org/Changing_The_Site_URL
-    * `software: xenforo`
-        * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
+Forcing www is software specific, unlike forcing the https protocol, which is environment specific and driven by the `force_https` option. To force www ([why force www?](http://www.yes-www.org/)), please follow the respective guides per `software`:
+
+* `software: codeigniter2`
+    * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
+* `software: codeigniter3`
+    * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
+* `software: drupal6`
+    * `~/.htaccess` https://github.com/drupal/drupal/blob/6.x-18-security/.htaccess#L87
+* `software: drupal7`
+    * `~/.htaccess` https://github.com/drupal/drupal/blob/7.x/.htaccess#L89
+* `software: silverstripe`
+    * `~/mysite/_config.php` no official documentation - http://www.ssbits.com/snippets/2010/a-config-php-cheatsheet/
+* `software: wordpress`
+    * http://codex.wordpress.org/Changing_The_Site_URL
+* `software: xenforo`
+    * `~/.htaccess` no official documentation - http://stackoverflow.com/a/4958847/4838803
+
+### Database Migrations ###
+
+The best way to handle changes to the software's database schema is through a migrations system. Database migrations are software specific and are invoked via Catapult for you, here we outline the specifics:
+
+Software | Tool | Command | Documentation
+---------|------|---------|--------------
+codeigniter2   | Migrations | `php index.php migrate` | https://ellislab.com/codeigniter/user-guide/libraries/migration.html
+codeigniter3   | Migrations | `php index.php migrate` | https://www.codeigniter.com/user_guide/libraries/migration.html
+drupal6        | Drush      | `drush updatedb -y`     | https://www.drupal.org/node/150215
+drupal7        | Drush      | `drush updatedb -y`     | https://www.drupal.org/node/150215
+silverstripe   |            |                         |
+wordpress      | WP-CLI     | `wp-cli core update-db` | http://codex.wordpress.org/Creating_Tables_with_Plugins#Adding_an_Upgrade_Function
+xenforo        |            |                         |
+
 
 ### Refreshing Databases ###
 
@@ -982,7 +1010,7 @@ The Catapult team values partnerships and continuous improvement.
 
 Catapult is making the conference tour! We plan to attend the following conferences, with more to come. Get a chance to see Catapult in action, presented by it's core developers.
 
-* Spring 2016 [04-08-2016] [Drupaldelphia](http://drupaldelphia.com/)
+* Spring 2016 [04-08-2016] [Drupaldelphia](http://drupaldelphia.com/): DevOps Discipline: Detailed and Complete
 * Summer 2016 [Wharton Web Conference](http://www.sas.upenn.edu/wwc/)
 * Winter 2016 [WordCamp US](http://us.wordcamp.org/)
 

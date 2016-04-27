@@ -113,7 +113,7 @@ elif [ "${software}" = "xenforo" ]; then
     sudo chmod 0444 "${file}"
 fi
 
-# set ownership of user generated directories
+# set ownership of file store containers
 if [ "$software" = "codeigniter2" ]; then
     if [ -d "/var/www/repositories/apache/${domain}/${webroot}uploads" ]; then
         echo -e "setting permissions for $software upload directory ~/uploads"
@@ -147,12 +147,12 @@ elif [ "$software" = "drupal7" ]; then
         sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}sites/default
     fi
 elif [ "$software" = "wordpress" ]; then
-    if [ -d "/var/www/repositories/apache/${domain}/${webroot}wp-content/uploads" ]; then
-        echo -e "setting permissions for $software upload directory ~/wp-content/uploads"
+    if [ -d "/var/www/repositories/apache/${domain}/${webroot}wp-content" ]; then
+        echo -e "setting permissions for $software upload directory ~/wp-content"
         if [ "$1" != "dev" ]; then
-            sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}wp-content/uploads
+            sudo chown -R apache /var/www/repositories/apache/${domain}/${webroot}wp-content
         fi
-        sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}wp-content/uploads
+        sudo chmod -R 0700 /var/www/repositories/apache/${domain}/${webroot}wp-content
     fi
 elif [ "$software" = "xenforo" ]; then
     if [ -d "/var/www/repositories/apache/${domain}/${webroot}data" ]; then
@@ -171,19 +171,33 @@ elif [ "$software" = "xenforo" ]; then
     fi
 fi
 
+# flush meta tables to cut size, prevent potential issues restoring, and good house cleaning
 # run software database update operations
 if [ "$software" = "codeigniter2" ]; then
-    :
-    #cd "/var/www/repositories/apache/${domain}/${webroot}" && php index.php migrate
+    output=$(cd "/var/www/repositories/apache/${domain}/${webroot}" && php index.php migrate)
+    if echo $output | grep --extended-regexp --quiet --regexp="<html" --regexp="<\?"; then
+        echo -e "Migrations are not configured"
+    else
+        echo $output
+    fi
 elif [ "$software" = "codeigniter3" ]; then
-    :
-    #cd "/var/www/repositories/apache/${domain}/${webroot}" && php index.php migrate
+    output=$(cd "/var/www/repositories/apache/${domain}/${webroot}" && php index.php migrate)
+    if echo $output | grep --extended-regexp --quiet --regexp="<html" --regexp="<\?"; then
+        echo -e "Migrations are not configured"
+    else
+        echo $output
+    fi
 elif [ "$software" = "drupal6" ]; then
+    cd "/var/www/repositories/apache/${domain}/${webroot}" && drush watchdog-delete all -y
     cd "/var/www/repositories/apache/${domain}/${webroot}" && drush updatedb -y
+    cd "/var/www/repositories/apache/${domain}/${webroot}" && drush cache-clear all -y
 elif [ "$software" = "drupal7" ]; then
+    cd "/var/www/repositories/apache/${domain}/${webroot}" && drush watchdog-delete all -y
     cd "/var/www/repositories/apache/${domain}/${webroot}" && drush updatedb -y
+    cd "/var/www/repositories/apache/${domain}/${webroot}" && drush cache-clear all -y
 elif [ "$software" = "wordpress" ]; then
     cd "/var/www/repositories/apache/${domain}/${webroot}" && php /catapult/provisioners/redhat/installers/wp-cli.phar --allow-root core update-db
+    cd "/var/www/repositories/apache/${domain}/${webroot}" && php /catapult/provisioners/redhat/installers/wp-cli.phar --allow-root cache flush
 fi
 
 touch "/catapult/provisioners/redhat/logs/software_config.$(catapult websites.apache.$5.domain).complete"
