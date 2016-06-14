@@ -29,16 +29,23 @@ else
         domain_expanded="${1}.${domain}.${domain_tld_override}"
     fi
 fi
+force_https=$(catapult websites.apache.$5.force_https)
+if [ "${force_https}" = "True" ]; then
+    domain_expanded_protocol="https:\\/\\/${domain_expanded}"
+else
+    domain_expanded_protocol="http:\\/\\/${domain_expanded}"
+fi
 domainvaliddbname=$(catapult websites.apache.$5.domain | tr "." "_")
 software=$(catapult websites.apache.$5.software)
 software_dbprefix=$(catapult websites.apache.$5.software_dbprefix)
+softwareroot=$(provisioners software.apache.${software}.softwareroot)
 webroot=$(catapult websites.apache.$5.webroot)
 database_config_file=$(provisioners software.apache.${software}.database_config_file)
 
 # generate database config files
 if [ "${software}" = "codeigniter2" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -55,7 +62,7 @@ if [ "${software}" = "codeigniter2" ]; then
 
 elif [ "${software}" = "codeigniter3" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -72,7 +79,7 @@ elif [ "${software}" = "codeigniter3" ]; then
 
 elif [ "${software}" = "drupal6" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -86,7 +93,7 @@ elif [ "${software}" = "drupal6" ]; then
 
 elif [ "${software}" = "drupal7" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -102,7 +109,7 @@ elif [ "${software}" = "expressionengine3" ]; then
 
     # https://docs.expressionengine.com/latest/general/system_configuration_overrides.html
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -114,21 +121,21 @@ elif [ "${software}" = "expressionengine3" ]; then
         --expression="s/'password'\s=>\s''/'password' => '${mysql_user_password}'/g" \
         --expression="s/'database'\s=>\s''/'database' => '${1}_${domainvaliddbname}'/g" \
         --expression="s/'dbprefix'\s=>\s''/'dbprefix' => '${software_dbprefix}'/g" \
-        --expression="s/\$config\['avatar_url'\]\s=\s'';/\$config\['avatar_url'\] = 'http:\\/\\/${domain_expanded}\\/images\\/avatars';/g" \
-        --expression="s/\$config\['captcha_url'\]\s=\s'';/\$config\['captcha_url'\] = 'http:\\/\\/${domain_expanded}\\/images\\/captchas';/g" \
+        --expression="s/\$config\['avatar_url'\]\s=\s'';/\$config\['avatar_url'\] = '${domain_expanded_protocol}\\/images\\/avatars';/g" \
+        --expression="s/\$config\['captcha_url'\]\s=\s'';/\$config\['captcha_url'\] = '${domain_expanded_protocol}\\/images\\/captchas';/g" \
         --expression="s/\$config\['cookie_domain'\]\s=\s'';/\$config\['cookie_domain'\] = '.${domain_expanded}';/g" \
-        --expression="s/\$config\['cp_url'\]\s=\s'';/\$config\['cp_url'\] = 'http:\\/\\/${domain_expanded}\\/admin.php';/g" \
-        --expression="s/\$config\['emoticon_url'\]\s=\s'';/\$config\['emoticon_url'\] = 'http:\\/\\/${domain_expanded}\\/images\\/smileys';/g" \
-        --expression="s/\$config\['sig_img_url'\]\s=\s'';/\$config\['sig_img_url'\] = 'http:\\/\\/${domain_expanded}\\/images\\/signatures';/g" \
-        --expression="s/\$config\['site_url'\]\s=\s'';/\$config\['site_url'\] = 'http:\\/\\/${domain_expanded}';/g" \
-        --expression="s/\$config\['theme_folder_url'\]\s=\s'';/\$config\['theme_folder_url'\] = 'http:\\/\\/${domain_expanded}\\/themes';/g" \
+        --expression="s/\$config\['cp_url'\]\s=\s'';/\$config\['cp_url'\] = '${domain_expanded_protocol}\\/admin.php';/g" \
+        --expression="s/\$config\['emoticon_url'\]\s=\s'';/\$config\['emoticon_url'\] = '${domain_expanded_protocol}\\/images\\/smileys';/g" \
+        --expression="s/\$config\['sig_img_url'\]\s=\s'';/\$config\['sig_img_url'\] = '${domain_expanded_protocol}\\/images\\/signatures';/g" \
+        --expression="s/\$config\['site_url'\]\s=\s'';/\$config\['site_url'\] = '${domain_expanded_protocol}';/g" \
+        --expression="s/\$config\['theme_folder_url'\]\s=\s'';/\$config\['theme_folder_url'\] = '${domain_expanded_protocol}\\/themes';/g" \
         --expression="s/\$config\['new_relic_app_name'\]\s=\s'';/\$config\['new_relic_app_name'\] = '${domain_environment}';/g" \
         /catapult/provisioners/redhat/installers/software/${software}/config.php > "${file}"
     sudo chmod 0444 "${file}"
 
 elif [ "${software}" = "joomla3" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -145,9 +152,43 @@ elif [ "${software}" = "joomla3" ]; then
         /catapult/provisioners/redhat/installers/software/${software}/configuration.php > "${file}"
     sudo chmod 0444 "${file}"
 
+elif [ "${software}" = "laravel5" ]; then
+
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
+    echo -e "generating ${software} ${file}..."
+    if [ -f "${file}" ]; then
+        sudo chmod 0777 "${file}"
+    else
+        mkdir --parents $(dirname "${file}")
+    fi
+    sed --expression="s/env('DB_HOST',\s'localhost')/'${redhat_mysql_ip}'/g" \
+        --expression="s/env('DB_DATABASE',\s'forge')/'${1}_${domainvaliddbname}'/g" \
+        --expression="s/env('DB_USERNAME',\s'forge')/'${mysql_user}'/g" \
+        --expression="s/env('DB_PASSWORD',\s'')/'${mysql_user_password}'/g" \
+        /catapult/provisioners/redhat/installers/software/${software}/database.php > "${file}"
+    sudo chmod 0444 "${file}"
+
+elif [ "${software}" = "mediawiki1" ]; then
+
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
+    echo -e "generating ${software} ${file}..."
+    if [ -f "${file}" ]; then
+        sudo chmod 0777 "${file}"
+    else
+        mkdir --parents $(dirname "${file}")
+    fi
+    sed --expression="s/\$wgScriptPath\s=\s\"\";/\$wgScriptPath = \"${domain_expanded_protocol}\";/g" \
+        --expression="s/\$wgDBserver\s=\s\"\";/\$wgDBserver = \"${redhat_mysql_ip}\";/g" \
+        --expression="s/\$wgDBname\s=\s\"\";/\$wgDBname = \"${1}_${domainvaliddbname}\";/g" \
+        --expression="s/\$wgDBuser\s=\s\"\";/\$wgDBuser = \"${mysql_user}\";/g" \
+        --expression="s/\$wgDBpassword\s=\s\"\";/\$wgDBpassword = \"${mysql_user_password}\";/g" \
+        --expression="s/\$wgDBprefix\s=\s\"\";/\$wgDBprefix = \"${software_dbprefix}\";/g" \
+        /catapult/provisioners/redhat/installers/software/${software}/LocalSettings.php > "${file}"
+    sudo chmod 0444 "${file}"
+
 elif [ "${software}" = "moodle3" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -159,14 +200,14 @@ elif [ "${software}" = "moodle3" ]; then
         --expression="s/\$CFG->dbuser\s=\s'username';/\$CFG->dbuser = '${mysql_user}';/g" \
         --expression="s/\$CFG->dbpass\s=\s'password';/\$CFG->dbpass = '${mysql_user_password}';/g" \
         --expression="s/\$CFG->prefix\s=\s'mdl_';/\$CFG->prefix = '${software_dbprefix}';/g" \
-        --expression="s/\$CFG->wwwroot\s=\s'';/\$CFG->wwwroot = 'http:\\/\\/${domain_expanded}';/g" \
+        --expression="s/\$CFG->wwwroot\s=\s'';/\$CFG->wwwroot = '${domain_expanded_protocol}';/g" \
         --expression="s/\$CFG->dataroot\s=\s'moodledata';/\$CFG->dataroot = '\\/var\\/www\\/repositories\\/apache\\/${domain}\\/${webroot}moodledata';/g" \
         /catapult/provisioners/redhat/installers/software/${software}/config.php > "${file}"
     sudo chmod 0444 "${file}"
 
 elif [ "${software}" = "silverstripe3" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -182,7 +223,7 @@ elif [ "${software}" = "silverstripe3" ]; then
 
 elif [ "${software}" = "suitecrm7" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -193,12 +234,13 @@ elif [ "${software}" = "suitecrm7" ]; then
         --expression="s/\$sugar_config\['dbconfig'\]\['db_user_name'\]\s=\s'';/\$sugar_config\['dbconfig'\]\['db_user_name'\] = '${mysql_user}';/g" \
         --expression="s/\$sugar_config\['dbconfig'\]\['db_password'\]\s=\s'';/\$sugar_config\['dbconfig'\]\['db_password'\] = '${mysql_user_password}';/g" \
         --expression="s/\$sugar_config\['dbconfig'\]\['db_name'\]\s=\s'';/\$sugar_config\['dbconfig'\]\['db_name'\] = '${1}_${domainvaliddbname}';/g" \
+        --expression="s/\$sugar_config\['site_url'\]\s=\s'';/\$sugar_config\['site_url'\] = '${domain_expanded_protocol}';/g" \
         /catapult/provisioners/redhat/installers/software/${software}/config_override.php > "${file}"
     sudo chmod 0444 "${file}"
 
 elif [ "${software}" = "wordpress" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -215,7 +257,7 @@ elif [ "${software}" = "wordpress" ]; then
 
 elif [ "${software}" = "xenforo" ]; then
 
-    file="/var/www/repositories/apache/${domain}/${webroot}${database_config_file}"
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
     echo -e "generating ${software} ${file}..."
     if [ -f "${file}" ]; then
         sudo chmod 0777 "${file}"
@@ -228,6 +270,23 @@ elif [ "${software}" = "xenforo" ]; then
         --expression="s/\$config\['db'\]\['dbname'\]\s=\s'';/\$config\['db'\]\['dbname'\] = '${1}_${domainvaliddbname}';/g" \
         /catapult/provisioners/redhat/installers/software/${software}/config.php > "${file}"
     sudo chmod 0444 "${file}"
+
+elif [ "${software}" = "zendframework2" ]; then
+
+    file="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${database_config_file}"
+    echo -e "generating ${software} ${file}..."
+    if [ -f "${file}" ]; then
+        sudo chmod 0777 "${file}"
+    else
+        mkdir --parents $(dirname "${file}")
+    fi
+    sed --expression="s/zf2tutorial/${1}_${domainvaliddbname}/g" \
+        --expression="s/localhost/${redhat_mysql_ip}/g" \
+        --expression="s/'username'\s=>\s''/'username' => '${mysql_user}'/g" \
+        --expression="s/'password'\s=>\s''/'password' => '${mysql_user_password}'/g" \
+        /catapult/provisioners/redhat/installers/software/${software}/global.php > "${file}"
+    sudo chmod 0444 "${file}"
+
 fi
 
 # set directory permissions of software file store containers
@@ -237,7 +296,7 @@ else
     cat "/catapult/provisioners/provisioners.yml" | shyaml get-values-0 software.apache.$(catapult websites.apache.$5.software).file_store_containers |
     while read -r -d $'\0' file_store_container; do
 
-        file_store_container="/var/www/repositories/apache/${domain}/${webroot}${file_store_container}"
+        file_store_container="/var/www/repositories/apache/${domain}/${webroot}${softwareroot}${file_store_container}"
         echo -e "software file store container: ${file_store_container}"
 
         # if the file store container does not exist, create it
