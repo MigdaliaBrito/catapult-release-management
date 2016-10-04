@@ -12,6 +12,7 @@ company_email="$(echo "${configuration}" | shyaml get-value company.email)"
 echo "${configuration}" | shyaml get-values-0 websites.apache |
 while IFS='' read -r -d '' key; do
 
+    # define variables
     domain=$(echo "$key" | grep -w "domain" | cut -d ":" -f 2 | tr -d " ")
     domain_environment=$(echo "$key" | grep -w "domain" | cut -d ":" -f 2 | tr -d " ")
     if [ "$1" != "production" ]; then
@@ -32,15 +33,20 @@ while IFS='' read -r -d '' key; do
     software_workflow=$(echo "$key" | grep -w "software_workflow" | cut -d ":" -f 2 | tr -d " ")
     webroot=$(echo "$key" | grep -w "webroot" | cut -d ":" -f 2 | tr -d " ")
 
-    # configure vhost
-    if [ "$1" = "production" ]; then
-        echo -e "\t * configuring vhost for ${domain_root}"
-    else
-        echo -e "\t * configuring vhost for ${1}.${domain_root}"
+    # generate letsencrypt certificates for upstream
+    if ([ "$1" != "dev" ]); then
+        if [ -z "${domain_tld_override}" ]; then
+            bash /catapult/provisioners/redhat/installers/dehydrated/dehydrated --cron --domain "${domain_environment}" --domain "www.${domain_environment}" 2>&1
+        else
+            bash /catapult/provisioners/redhat/installers/dehydrated/dehydrated --cron --domain "${domain_environment}.${domain_tld_override}" --domain "www.${domain_environment}.${domain_tld_override}" 2>&1
+        fi
     fi
+
+    # configure vhost
+    echo -e "Configuring vhost for ${domain_environment}"
     sudo mkdir --parents /var/log/httpd/${domain_environment}
-    sudo touch /var/log/httpd/${domain_environment}/access.log
-    sudo touch /var/log/httpd/${domain_environment}/error.log
+    sudo touch /var/log/httpd/${domain_environment}/access_log
+    sudo touch /var/log/httpd/${domain_environment}/error_log
     # set domain_tld_override_alias_additions for vhost
     if [ -z "${domain_tld_override}" ]; then
         domain_tld_override_alias_additions=""
@@ -55,35 +61,67 @@ while IFS='' read -r -d '' key; do
             if ([[ "${force_auth_excludes[@]}" =~ "$1" ]]); then
                 force_auth_value=""
             else
-                sudo htpasswd -b -c /etc/httpd/sites-enabled/${domain_environment}.htpasswd ${force_auth} ${force_auth} 2>&1 | sed "s/^/\t\t/"
-                force_auth_value="<Location />
+                sudo htpasswd -b -c /etc/httpd/sites-enabled/${domain_environment}.htpasswd ${force_auth} ${force_auth} 2>&1
+                force_auth_value="
+                    <Location />
+                        # Force HTTP authentication
+                        AuthType Basic
+                        AuthName \"Authentication Required\"
+                        AuthUserFile \"/etc/httpd/sites-enabled/${domain_environment}.htpasswd\"
+                        Require valid-user
+                    </Location>
+                "
+            fi
+        else
+            sudo htpasswd -b -c /etc/httpd/sites-enabled/${domain_environment}.htpasswd ${force_auth} ${force_auth} 2>&1
+            force_auth_value="
+                <Location />
                     # Force HTTP authentication
                     AuthType Basic
                     AuthName \"Authentication Required\"
                     AuthUserFile \"/etc/httpd/sites-enabled/${domain_environment}.htpasswd\"
                     Require valid-user
-                </Location>"
-            fi
-        else
-            sudo htpasswd -b -c /etc/httpd/sites-enabled/${domain_environment}.htpasswd ${force_auth} ${force_auth} 2>&1 | sed "s/^/\t\t/"
-            force_auth_value="<Location />
-                # Force HTTP authentication
-                AuthType Basic
-                AuthName \"Authentication Required\"
-                AuthUserFile \"/etc/httpd/sites-enabled/${domain_environment}.htpasswd\"
-                Require valid-user
-            </Location>"
+                </Location>
+            "
         fi
     else
         # never force_auth in dev
         force_auth_value=""
     fi
+    # handle ssl certificates
+    if ([ "$1" != "dev" ]) && ([ -z "${domain_tld_override}" ]) && ([ -f /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/cert.pem ]); then
+        # upstream without domain_tld_override and a letsencrypt cert available
+        ssl_certificates="
+        SSLCertificateFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/cert.pem
+        SSLCertificateKeyFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/privkey.pem
+        SSLCertificateChainFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/chain.pem
+        "
+    elif ([ "$1" != "dev" ]) && ([ ! -z "${domain_tld_override}" ]) && ([ -f /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/cert.pem ]); then
+        # upstream with domain_tld_override and a letsencrypt cert available
+        ssl_certificates="
+        SSLCertificateFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/cert.pem
+        SSLCertificateKeyFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/privkey.pem
+        SSLCertificateChainFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/chain.pem
+        "
+    else
+        # self-signed in localdev or if we do not have a letsencrypt cert
+        ssl_certificates="
+        SSLCertificateFile /etc/ssl/certs/httpd-dummy-cert.key.cert
+        SSLCertificateKeyFile /etc/ssl/certs/httpd-dummy-cert.key.cert
+        "
+    fi
     # handle the force_https option
     if [ "${force_https}" = true ]; then
-        force_https_value="Redirect Permanent / https://${domain_environment}"
+        force_https_value="
+        # use X-Forwarded-Proto to accomodate load balancers, proxies, etc
+        # !https rather than =http to match when X-Forwarded-Proto is not set
+        RewriteEngine On
+        RewriteCond %{HTTP:X-Forwarded-Proto} !https
+        RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+        "
         force_https_hsts="Header always set Strict-Transport-Security \"max-age=15768000\""
     else
-        force_https_value=""
+        force_https_value="# HTTPS is only forced when force_https=true"
         force_https_hsts="# HSTS is only enabled when force_https=true"
     fi
     # write vhost apache conf file
@@ -97,11 +135,11 @@ while IFS='' read -r -d '' key; do
         ServerAlias www.${domain_environment}
         $domain_tld_override_alias_additions
         DocumentRoot /var/www/repositories/apache/${domain}/${webroot}
-        ErrorLog /var/log/httpd/${domain_environment}/error.log
-        CustomLog /var/log/httpd/${domain_environment}/access.log combined
+        ErrorLog /var/log/httpd/${domain_environment}/error_log
+        CustomLog /var/log/httpd/${domain_environment}/access_log combined
         LogLevel warn
-        $force_auth_value
-        $force_https_value
+        ${force_auth_value}
+        ${force_https_value}
     </VirtualHost> 
 
     <IfModule mod_ssl.c>
@@ -109,9 +147,10 @@ while IFS='' read -r -d '' key; do
             ServerAdmin ${company_email}
             ServerName ${domain_environment}
             ServerAlias www.${domain_environment}
+            $domain_tld_override_alias_additions
             DocumentRoot /var/www/repositories/apache/${domain}/${webroot}
-            ErrorLog /var/log/httpd/${domain_environment}/error.log
-            CustomLog /var/log/httpd/${domain_environment}/access.log combined
+            ErrorLog /var/log/httpd/${domain_environment}/error_log
+            CustomLog /var/log/httpd/${domain_environment}/access_log combined
             LogLevel warn
             SSLEngine on
 
@@ -140,10 +179,10 @@ while IFS='' read -r -d '' key; do
             # help old browsers
             BrowserMatch "MSIE [2-5]" nokeepalive ssl-unclean-shutdown downgrade-1.0 force-response-1.0
             
-            # set the server certificate
-            SSLCertificateFile /etc/ssl/certs/httpd-dummy-cert.key.cert
-            SSLCertificateKeyFile /etc/ssl/certs/httpd-dummy-cert.key.cert
+            # set the ssl certificates
+            ${ssl_certificates}
             
+            # force httpd basic auth if configured
             ${force_auth_value}
             
         </VirtualHost>
@@ -173,6 +212,7 @@ EOF
     fi
 
 done
+
 # reload apache
 sudo systemctl reload httpd.service
 sudo systemctl status httpd.service
