@@ -1,7 +1,7 @@
 # Catapult #
 <img src="https://cdn.rawgit.com/devopsgroup-io/catapult/master/repositories/apache/_default_/svg/catapult.svg" alt="Catapult" width="200">
 
-Catapult defines a best-practice infrastructure so you don't have to - it also aligns with Agile methodologies, like Scrum, to afford you everything you need to develop and deploy a website with ease.
+Catapult defines a best-practice infrastructure so you don't have to - it also aligns with Agile methodologies, like Scrum, to afford you everything you need to develop, deploy, and maintain a website with ease.
 
 <img src="https://cdn.rawgit.com/devopsgroup-io/catapult/master/catapult/installers/images/catapult_infrastructure.png" alt="Catapult Infrastructure">
 
@@ -165,6 +165,9 @@ See an error or have a suggestion? Email competition@devopsgroup.io - we appreci
     - [Provision Environments](#provision-environments)
     - [Configure Automated Deployments](#configure-automated-deployments)
 - [Release Management](#release-management)
+    - [Software Workflow](#software-workflow)
+        - [Downstream](#downstream)
+        - [Upstream](#upstream)
     - [Catapult Configuration](#catapult-configuration)
         - [Company](#company)
         - [Environments](#environments)
@@ -176,7 +179,7 @@ See an error or have a suggestion? Email competition@devopsgroup.io - we appreci
         - [Database Migrations](#database-migrations)
         - [Refreshing Databases](#refreshing-databases)
         - [Connecting to Databases](#connecting-to-databases)
-        - [Hotfixes](#hotfixes)
+        - [Production Hotfixes](#production-hotfixes)
     - [Performance Testing](#performance-testing)
         - [Website Concurrency Maximum](#website-concurrency-maximum)
         - [Interpreting Apache AB Results](#interpreting-apache-ab-results)
@@ -558,27 +561,42 @@ Once the Web and Database Servers are up and running, it's then time to configur
 
 # Release Management #
 
-Catapult follows Gitflow for its **infrastructure configuration** *and* **website development** model - each environment runs a specific branch and changesets are introduced into each environment by pull requests from one branch to the next.
+Catapult follows Gitflow for its **infrastructure configuration** *and* **website development** model - each environment is branch-based and changesets are introduced into each environment by pull requests from one branch to the next.
 
 <img src="https://cdn.rawgit.com/devopsgroup-io/catapult/master/catapult/installers/images/catapult_release_management.png" alt="Catapult Release Management">
 <sup>[1](#references)</sup>
 
-
-Environment | LocalDev | Test | QC | Production
+            | LocalDev | Test | QC | Production
 ------------|----------|------|----|-----------
 **Running Branch**                                       | *develop*                                                   | *develop*                                                                                                      | *release*                                                      | *master*
 **Deployments**                                          | Manually via `vagrant provision`                            | Automatically via Bamboo (new commits to **develop**)                                                          | Automatically via Bamboo (new commits to **release**)          | Manually via Bamboo
 **Testing Activities**                                   | Component Test                                              | Integration Test, System Test                                                                                  | Acceptance Test, Release Test                                  | Operational Qualification
 **Scrum Activity**                                       | Sprint Start: Development of User Stories                   | Daily Scrum                                                                                                    | Sprint Review                                                  | Sprint End: Accepted Product Release
 **Scrum Roles**                                          | Development Team                                            | Scrum Master, Development Team, Product Owner (optional)                                                       | Scrum Master, Development Team, Product Owner                  | Product Owner
-**Downstream Software Workflow - Database**              | Restore from **develop** `~/_sql` folder of website repo    | Restore from **develop** `~/_sql` folder of website repo                                                       | Restore from **release** `~/_sql` folder of website repo       | Auto-commit one backup per day (up to 500MB or 1) to **master** `~/_sql` folder of website repo during deploy
-**Downstream Software Workflow - Untracked File Stores** | rsync file stores from **Production**                       | rsync file stores from **Production**                                                                          | rsync file stores from **Production**                          | Pull file stores from **master**
-**Downstream Software Workflow - Tracked File Stores**   | Pull file stores from **develop**                           | Pull file stores from **develop**                                                                              | Pull file stores from **release**                              | Auto-commit file stores (up to 750MB each) to **master** of website repo during deploy
-**Upstream Software Workflow - Database**                | Restore from **develop** `~/_sql` folder of website repo    | Auto-commit one backup per day (up to 500MB or 1) to **develop** `~/_sql` folder of website repo during deploy | Restore from **release** `~/_sql` folder of website repo       | Restore from **master** `~/_sql` folder of website repo
-**Upstream Software Workflow - Untracked File Stores**   | rsync file stores from **Test**                             | Pull file stores from **develop**                                                                              | rsync file stores from **Test**                                | rsync file stores from **Test**
-**Upstream Software Workflow - Tracked File Stores**     | Pull file stores from **develop**                           | Auto-commit file stores (up to 750MB each) to **develop** of website repo during deploy                        | Pull file stores from **release**                              | Pull file stores from **master**
 
-**NOTE:** Catapult will automatically pull **master** into **develop** when in the **Downstream Software Workflow** direction.
+## Software Workflow ##
+
+Catapult enforces a unique solution to Release Management of a website, Software Workflow. Software Workflow offers two modes, downstream or upstream, creating a "golden environment".
+
+<img src="https://cdn.rawgit.com/devopsgroup-io/catapult/master/catapult/installers/images/catapult_software_workflow.png" alt="Catapult Software Workflow">
+
+### Downstream ###
+
+            | LocalDev | Test | QC | Production
+------------|----------|------|----|-----------
+**Downstream Software Workflow - Database**              | Restore from **develop** `~/_sql` folder of website repo    | Restore from **develop** `~/_sql` folder of website repo                                                       | Restore from **release** `~/_sql` folder of website repo       | Auto-commit one backup per day (up to 500MB or 1) to **master** `~/_sql` folder of website repo
+**Downstream Software Workflow - Untracked File Stores** | rsync file stores from **Production**                       | rsync file stores from **Production**                                                                          | rsync file stores from **Production**                          | 
+**Downstream Software Workflow - Tracked File Stores**   | Pull file stores from **develop**                           | Pull file stores from **develop**                                                                              | Pull file stores from **release**                              | Auto-commit file stores (up to 750MB each) to **master** of website repo
+
+**NOTE:** Catapult will automatically pull the **master** branch into the **develop** branch of a website's repository when in the **Downstream Software Workflow** direction.
+
+### Upstream ###
+
+            | LocalDev | Test | QC | Production
+------------|----------|------|----|-----------
+**Upstream Software Workflow - Database**                | Restore from **develop** `~/_sql` folder of website repo    | Auto-commit one backup per day (up to 500MB or 1) to **develop** `~/_sql` folder of website repo | Restore from **release** `~/_sql` folder of website repo       | Restore from **master** `~/_sql` folder of website repo
+**Upstream Software Workflow - Untracked File Stores**   | rsync file stores from **Test**                             |                                                                                                  | rsync file stores from **Test**                                | rsync file stores from **Test**
+**Upstream Software Workflow - Tracked File Stores**     | Pull file stores from **develop**                           | Auto-commit file stores (up to 750MB each) to **develop** of website repo                        | Pull file stores from **release**                              | Pull file stores from **master**
 
 ## Catapult Configuration ##
 
@@ -659,7 +677,7 @@ The following options are available:
             * `dev.example.com.mycompany.com`, `test.example.com.mycompany.com`, `qc.example.com.mycompany.com`, `example.com.mycompany.com`
         * PLEASE NOTE: When removing this option from a website with `software:`, you need to manually replace URLs in the database respective to the `software_workflow:` option.
             * ie `vagrant ssh mycompany.com-test-redhat-mysql`
-            * `php /catapult/provisioners/redhat/installers/wp-cli.phar --allow-root --path="/var/www/repositories/apache/example.com/(webroot if applicable)" search-replace ":\/\/(www\.)?(dev\.|test\.)?(example\.com\.mycompany\.com)" "://example.com" --regex`
+            * `wp-cli --allow-root --path="/var/www/repositories/apache/example.com/(webroot if applicable)" search-replace ":\/\/(www\.)?(dev\.|test\.)?(example\.com\.mycompany\.com)" "://example.com" --regex`
 * `force_auth:`
     * required: no
     * example: `force_auth: letmein`
@@ -842,9 +860,9 @@ Oracle SQL Developer is the recommended tool, to connect to and work with, datab
         * Then add a New Connection with the respective environment's mysql user values in `~/secrets/configuration.yml`.
             * The hostname will be localhost since we are forwarding the port through our local SSH tunnel.
 
-### Hotfixes ###
+### Production Hotfixes ###
 
-Always weigh the risk of *not performing* a hotfix versus *performing* it, as hotfixes require going outside of the normal development and testing workflow. Performing a hotfix varies depending on the website's `software` type, `software_workflow` direction, and type of change (code or database).
+Always weigh the risk of *not performing* a production hotfix versus *performing* it, as production hotfixes require going outside of the normal development and testing workflow. Performing a production hotfix varies depending on the website's `software` type, `software_workflow` direction, and type of change (code or database).
 
 * `software_workflow: downstream`
     * **Code**
@@ -857,7 +875,7 @@ Always weigh the risk of *not performing* a hotfix versus *performing* it, as ho
         7. Provision any related LocalDev servers
     * **Database**
         * Login to the Production website and make the change
-            * (any database change that is beyond the direct capability of the `software` should not be taken out as a hotfix)
+            * (any database change that is beyond the direct capability of the `software` should not be taken out as a production hotfix)
 * `software_workflow: upstream`
     * **Code**
         1. In `~/configuration.yml`, temporarily set the environments -> dev -> branch key to `branch: master`, and do not commit the change
@@ -869,7 +887,7 @@ Always weigh the risk of *not performing* a hotfix versus *performing* it, as ho
         7. Provision any related LocalDev servers
     * **Database**
         1. Login to the Production *and* Test website and make the change
-            * (any database change that is beyond the direct capability of logging into the `software` and safely making the change, should not be taken out as a hotfix)
+            * (any database change that is beyond the direct capability of logging into the `software` and safely making the change, should not be taken out as a production hotfix)
         2. From LocalDev and the `develop` branch of the website's repository, commit a deletion of today's (if exists) SQL dump file from within the `~/sql` folder
             * (this ensures there is a known committed SQL dump of your change to the `develop` branch for when this branch is merged upstream)
         3. From LocalDev, temporarily checkout the `master` branch of the website's repository, make your change in the most recent SQL dump file from within the `~/sql` folder

@@ -43,11 +43,19 @@ module Catapult
     require "yaml"
 
 
+    # define a unique lock file
+    @lock_file_unique = SecureRandom.urlsafe_base64(8) + '.lock'
+
+
     # format errors
     def Command::catapult_exception(error)
       begin
         raise error
       rescue => exception
+        # remove the known unique lock file
+        if File.exist?(@lock_file_unique)
+          FileUtils.rm(@lock_file_unique)
+        end
         puts "\n\n"
         title = "Catapult Error:"
         length = title.size
@@ -126,18 +134,18 @@ module Catapult
     end
 
 
-    # locking in order to prevent multiple executions occurring at once (e.g. competing command line and Bamboo executions)
+    # manage a unique lock file to prevent multiple executions occurring at once to prevent operations such as git from causing havoc
     begin
       Timeout::timeout(60) do
-        while File.exist?('.lock')
+        while !Dir.glob('*.lock').empty?
            puts "Waiting for another Catapult process to finish so that we can safely continue...".color(Colors::YELLOW)
            sleep 5
         end
       end
     rescue Timeout::Error
-      catapult_exception("Wating took longer than expected. The .lock file is present in this directory, indicating that another Catapult process may have hung or ended unexpectedly. Once verifying that no conflict exists, remove the .lock file and try again.")
+      catapult_exception("Wating took longer than expected. A .lock file is present in this directory, indicating that another Catapult process may have hung or ended unexpectedly. Once verifying that no conflict exists, remove the .lock file and try again.")
     end
-    FileUtils.touch('.lock')
+    FileUtils.touch(@lock_file_unique)
 
 
     # check for an internet connection
@@ -337,11 +345,11 @@ module Catapult
     # bootstrap secrets/configuration-user.yml
     # generate secrets/configuration-user.yml file if it does not exist
     unless File.exist?("secrets/configuration-user.yml")
-      FileUtils.cp("secrets/configuration-user.yml.template", "secrets/configuration-user.yml")
+      FileUtils.cp("catapult/installers/templates/configuration-user.yml.template", "secrets/configuration-user.yml")
     end
-    # parse secrets/configuration-user.yml and secrets/configuration-user.yml.template file
+    # parse secrets/configuration-user.yml and catapult/installers/templates/configuration-user.yml.template file
     @configuration_user = YAML.load_file("secrets/configuration-user.yml")
-    @configuration_user_template = YAML.load_file("secrets/configuration-user.yml.template")
+    @configuration_user_template = YAML.load_file("catapult/installers/templates/configuration-user.yml.template")
     # check for required fields
     if @configuration_user["settings"]["gpg_key"] == nil || @configuration_user["settings"]["gpg_key"].match(/\s/) || @configuration_user["settings"]["gpg_key"].length < 20
       catapult_exception("Please set your team's gpg_key in secrets/configuration-user.yml - spaces are not permitted and must be at least 20 characters.")
@@ -372,7 +380,7 @@ module Catapult
       # bootstrap secrets/configuration.yml
       # initialize secrets/configuration.yml.gpg
       if File.zero?("secrets/configuration.yml.gpg")
-        `gpg --batch --yes --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --output secrets/configuration.yml.gpg --armor --cipher-algo AES256 --symmetric secrets/configuration.yml.template`
+        `gpg --batch --yes --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --output secrets/configuration.yml.gpg --armor --cipher-algo AES256 --symmetric catapult/installers/templates/configuration.yml.template`
       end
       if @configuration_user["settings"]["gpg_edit"]
         unless File.exist?("secrets/configuration.yml")
@@ -385,6 +393,43 @@ module Catapult
           puts "\n * There were no changes to secrets/configuration.yml, no need to encrypt as this would create a new cipher to commit.\n\n"
         else
           puts "\n * There were changes to secrets/configuration.yml, encrypting secrets/configuration.yml as secrets/configuration.yml.gpg. Please commit these changes to the master branch for your team to get the changes.\n\n"
+          # flipping from downstream to upstream requires a production build to be run to ensure latest from production
+          # flipping from upstream to downstream requires a test build to be run to ensure latest from test
+          @temp_configuration_decrypted = YAML.load_file('secrets/configuration.yml')
+          @temp_configuration_encrypted = YAML.load_file('secrets/configuration.yml.compare')
+          @temp_configuration_decrypted["websites"].each do |service,data|
+            # loop through what is new to compare to what exists
+            unless @temp_configuration_decrypted["websites"]["#{service}"] == nil
+              @temp_configuration_decrypted["websites"]["#{service}"].each do |decrypted_instance|
+                # loop through what exists, find a match, then look for a difference
+                unless @temp_configuration_encrypted["websites"]["#{service}"] == nil
+                  @temp_configuration_encrypted["websites"]["#{service}"].each do |encrypted_instance|
+                    # find a matching domain
+                    if encrypted_instance["domain"] == decrypted_instance["domain"]
+                      # accomodate new websites
+                      unless encrypted_instance["software_workflow"] == nil
+                        # determine if there was a change to the software_workflow
+                        if encrypted_instance["software_workflow"] != decrypted_instance["software_workflow"]
+                          current_time = DateTime.now
+                          todays_date = current_time.strftime("%Y%m%d")
+                          todays_file = "repositories/#{service}/#{decrypted_instance["domain"]}/_sql/#{todays_date}.sql"
+                          unless File.exist?(todays_file)
+                            # from downstream to upstream
+                            if decrypted_instance["software_workflow"] == "upstream"
+                              catapult_exception("There was a change in software_workflow direction for #{decrypted_instance["domain"]} from #{encrypted_instance["software_workflow"]} to #{decrypted_instance["software_workflow"]} and today's SQL backup does not exist (#{todays_file}). Please first run a Production then Test deployment followed by a LocalDev provision.")
+                            # from upstream to upstream
+                            elsif decrypted_instance["software_workflow"] == "downstream"
+                              catapult_exception("There was a change in software_workflow direction for #{decrypted_instance["domain"]} from #{encrypted_instance["software_workflow"]} to #{decrypted_instance["software_workflow"]} and today's SQL backup does not exist (#{todays_file}). Please first run a Test deployment followed by a LocalDev deployment.")
+                            end
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
           `gpg --verbose --batch --yes --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --output secrets/configuration.yml.gpg --armor --cipher-algo AES256 --symmetric secrets/configuration.yml`
         end
         FileUtils.rm('secrets/configuration.yml.compare')
@@ -432,7 +477,7 @@ module Catapult
         `gpg --verbose --batch --yes --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --output secrets/id_rsa.pub --decrypt secrets/id_rsa.pub.gpg`
       end
     end
-    # create objects from secrets/configuration.yml.gpg and secrets/configuration.yml.template
+    # decrypt secrets/configuration.yml.gpg, id_rsa.gpg, and id_rsa.pub.gpg
     @configuration = YAML.load(`gpg --verbose --batch --passphrase "#{@configuration_user["settings"]["gpg_key"]}" --decrypt secrets/configuration.yml.gpg`)
     if $?.exitstatus > 0
       catapult_exception("Your configuration could not be decrypted, please confirm your team's gpg_key is correct in secrets/configuration-user.yml")
@@ -1411,8 +1456,8 @@ module Catapult
 
 
 
-    # remove lock file
-    File.delete('.lock')
+    # remove unique lock file
+    File.delete(@lock_file_unique)
 
 
 
@@ -1480,9 +1525,6 @@ module Catapult
           unless instance["force_https"] == nil
             unless ["true"].include?("#{instance["force_https"]}")
               catapult_exception("There is an error in your secrets/configuration.yml file.\nThe force_https for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be true or removed.")
-            end
-            unless instance["domain_tld_override"] == nil
-              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe force_https for websites => #{service} => domain => #{instance["domain"]} cannot be used in conjuction with domain_tld_override.")
             end
           end
           # create array of domains to later validate repo alpha order per service
