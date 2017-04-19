@@ -42,11 +42,11 @@ echo -e "\n> system hostname configuration"
 hostnamectl set-hostname "" --pretty
 
 # configure the hostname
-if ([ "${4}" = "apache" ]); then
+if ([ "${4}" == "apache" ]); then
     hostnamectl set-hostname "$(catapult company.name | tr '[:upper:]' '[:lower:]')-${1}-redhat"
-elif ([ "${4}" = "bamboo" ]); then
+elif ([ "${4}" == "bamboo" ]); then
     hostnamectl set-hostname "$(catapult company.name | tr '[:upper:]' '[:lower:]')-build"
-elif ([ "${4}" = "mysql" ]); then
+elif ([ "${4}" == "mysql" ]); then
     hostnamectl set-hostname "$(catapult company.name | tr '[:upper:]' '[:lower:]')-${1}-redhat-mysql"
 fi
 
@@ -75,38 +75,76 @@ echo -e "\n> system swap configuration"
 swaps=$(swapon --noheadings --show=NAME)
 swap_volumes=$(cat /etc/fstab | grep "swap" | awk '{print $1}')
 
-# remove all swaps except /swapfile
+if ([ "${4}" == "apache" ] || [ "${4}" == "mysql" ]); then
+
+    # create a 256MB swap at /swapfile if it does not exist
+    if [[ ! ${swaps[*]} =~ "/swapfile" ]]; then
+        echo -e "the swap /swapfile does not exist, creating..."
+        sudo dd if=/dev/zero of=/swapfile count=256 bs=1MiB
+        sudo chmod 0600 /swapfile
+        sudo mkswap /swapfile
+    fi
+    sudo swapon /swapfile
+    # add the swap /swapfile to startup if it does not exist
+    if [[ ! ${swap_volumes[*]} =~ "/swapfile" ]]; then
+        sudo bash -c 'echo -e "\n/swapfile swap    swap    defaults    0   0" >> /etc/fstab'
+    fi
+
+    # create a 512MB swap at /swapfile512 if it does not exist
+    if [[ ! ${swaps[*]} =~ "/swapfile512" ]]; then
+        echo -e "the swap /swapfile512 does not exist, creating..."
+        sudo dd if=/dev/zero of=/swapfile512 count=512 bs=1MiB
+        sudo chmod 0600 /swapfile512
+        sudo mkswap /swapfile512
+    fi
+    sudo swapon /swapfile512
+    # add the swap /swapfile512 to startup if it does not exist
+    if [[ ! ${swap_volumes[*]} =~ "/swapfile512" ]]; then
+        sudo bash -c 'echo -e "\n/swapfile512 swap    swap    defaults    0   0" >> /etc/fstab'
+    fi
+
+fi
+
+if ([ "${4}" == "bamboo" ]); then
+
+    # create a 768MB swap at /swapfile768 if it does not exist
+    if [[ ! ${swaps[*]} =~ "/swapfile768" ]]; then
+        echo -e "the swap /swapfile768 does not exist, creating..."
+        sudo dd if=/dev/zero of=/swapfile768 count=768 bs=1MiB
+        sudo chmod 0600 /swapfile768
+        sudo mkswap /swapfile768
+    fi
+    sudo swapon /swapfile768
+    # add the swap /swapfile768 to startup if it does not exist
+    if [[ ! ${swap_volumes[*]} =~ "/swapfile768" ]]; then
+        sudo bash -c 'echo -e "\n/swapfile768 swap    swap    defaults    0   0" >> /etc/fstab'
+    fi
+
+fi
+
+# define the swaps
+if ([ "${4}" == "apache" ] || [ "${4}" == "mysql" ]); then
+    defined_swaps=("/swapfile" "/swapfile512")
+elif ([ "${4}" == "bamboo" ]); then
+    defined_swaps=("/swapfile" "/swapfile512" "/swapfile768")
+fi
+# remove all swaps except the defined swaps
 while read -r swap; do
-    if [ "${swap}" != "/swapfile" ]; then
-        echo -e "only the /swapfile should exist, removing ${swap}..."
+    if [[ ! ${defined_swaps[*]} =~ "${swap}" ]]; then
+        echo -e "only the ${defined_swaps[*]} swap files should exist, removing ${swap}..."
         sudo swapoff "${swap}"
     fi
 done <<< "${swaps}"
-
-# remove all swap volumes from startup except /swapfile
+# remove all swap volumes from startup except the defined swaps
 while read -r swap_volume; do
-    if [ "${swap_volume}" != "/swapfile" ]; then
-        echo -e "only the /swapfile should exist, removing ${swap_volume}..."
+    if [[ ! ${defined_swaps[*]} =~ "${swap_volume}" ]]; then
+        echo -e "only the ${defined_swaps[*]} swap files should exist, removing ${swap_volume}..."
         # escape slashes for sed
         swap_volume=$(echo -e "${swap_volume}" | sed 's#\/#\\\/#g')
         # remove swap volumes that don't match /swapfile
         sed --in-place "/${swap_volume}/d" /etc/fstab
     fi
 done <<< "${swap_volumes}"
-
-# create the swap /swapfile if it does not exist
-if [[ ! ${swaps[*]} =~ "/swapfile" ]]; then
-    echo -e "the swap /swapfile does not exist, creating..."
-    sudo dd if=/dev/zero of=/swapfile count=256 bs=1MiB
-    sudo chmod 0600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
-fi
-
-# add the swap /swapfile to startup
-if [[ ! ${swap_volumes[*]} =~ "/swapfile" ]]; then
-    sudo bash -c 'echo -e "\n/swapfile swap    swap    defaults    0   0" >> /etc/fstab'
-fi
 
 # output the resulting swap
 swapon --summary
@@ -154,6 +192,11 @@ until [ $i -ge 10 ]; do
     fi
     i=$[$i+1]
 done
+
+
+
+echo -e "\n> system epel-release configuration"
+sudo yum install -y epel-release
 
 
 

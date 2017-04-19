@@ -31,11 +31,21 @@ if ! grep -q "ServerName localhost" "/etc/httpd/conf/httpd.conf"; then
    sudo bash -c 'echo -e "\nServerName localhost" >> /etc/httpd/conf/httpd.conf'
 fi
 
-# use sites-available, sites-enabled convention. this is a debianism - but the convention is common and easy understand
+# use sites-available, sites-enabled convention. this is a debianism - but the convention is common and easy to understand
 sudo mkdir --parents /etc/httpd/sites-available
 sudo mkdir --parents /etc/httpd/sites-enabled
 if ! grep -q "IncludeOptional sites-enabled/\*.conf" "/etc/httpd/conf/httpd.conf"; then
    sudo bash -c 'echo -e "\nIncludeOptional sites-enabled/*.conf" >> "/etc/httpd/conf/httpd.conf"'
+fi
+if ! grep -q "IncludeOptional sites-enabled/\*.conf" "/etc/httpd/conf.d/ssl.conf"; then
+   sudo bash -c 'echo -e "\nIncludeOptional sites-enabled/*.conf" >> "/etc/httpd/conf.d/ssl.conf"'
+fi
+
+# define the default ssl protocols
+# SSLv2: FUBAR
+# SSLv3: POODLE
+if ! grep -q "SSLProtocol all -SSLv2 -SSLv3" "/etc/httpd/conf.d/ssl.conf"; then
+    sudo bash -c 'echo -e "\nSSLProtocol all -SSLv2 -SSLv3" >> /etc/httpd/conf.d/ssl.conf'
 fi
 
 # 80: remove the default vhost
@@ -43,9 +53,6 @@ sudo cat /dev/null > /etc/httpd/conf.d/welcome.conf
 
 # 443: remove the default vhost
 sed -i '/<VirtualHost _default_:443>/,$d' "/etc/httpd/conf.d/ssl.conf"
-if ! grep -q "IncludeOptional sites-enabled/\*.conf" "/etc/httpd/conf.d/ssl.conf"; then
-   sudo bash -c 'echo -e "\nIncludeOptional sites-enabled/*.conf" >> "/etc/httpd/conf.d/ssl.conf"'
-fi
 
 # 80/443: create a _default_ catchall
 # if the vhost has not been linked, link the vhost
@@ -59,6 +66,8 @@ sh /etc/ssl/certs/renew-dummy-cert /etc/ssl/certs/httpd-dummy-cert.key.cert
 
 # support letsencrypt
 sudo mkdir --parents /var/www/dehydrated
+# initalize the domains.txt file for certificates cron job
+cat /dev/null > /catapult/provisioners/redhat/installers/dehydrated/domains.txt
 
 # 80/443: create vhosts
 sudo cat > /etc/httpd/sites-enabled/_default_.conf << EOF
@@ -114,6 +123,13 @@ sudo cat > /etc/logrotate.d/httpd_vhosts << EOF
     endscript
 }
 EOF
+
+# add support for cloudflare and report real user IP addresses
+# also helps resolve redirect loops when HSTS is enabled
+# https://www.cloudflare.com/technical-resources/
+# new versions released here https://github.com/cloudflare/mod_cloudflare
+sudo yum install -y libtool httpd-devel
+sudo apxs -a -i -c /catapult/provisioners/redhat/installers/cloudflare/mod_cloudflare.c
 
 # reload apache
 sudo systemctl reload httpd.service

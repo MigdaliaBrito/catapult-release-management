@@ -189,7 +189,7 @@ module Catapult
     # configure catapult and git
     remote = `#{@git} config --get remote.origin.url`
     if remote.include?("devopsgroup-io/")
-      catapult_exception("In order to use Catapult Release Management, you must fork the repository so that the committed and encrypted configuration is unique to you! See https://github.com/devopsgroup-io/catapult for more information.")
+      catapult_exception("In order to use Catapult, you must fork the repository so that the committed and encrypted configuration is unique to you! See https://github.com/devopsgroup-io/catapult for more information.")
     end
     puts "\n\nSelf updating Catapult:\n".color(Colors::WHITE)
     `#{@git} fetch`
@@ -247,9 +247,20 @@ module Catapult
     puts "\n * Configuring the #{branch} branch:\n\n"
     # if on the develop branch, update from catapult core
     if "#{branch}" == "develop"
+      `#{@git} fetch`
+      # if there are changes between us and remote, write a changes file for later use
+      `#{@git} diff --exit-code --quiet develop origin/develop`
+      if $?.exitstatus > 0
+        FileUtils.touch('provisioners/redhat/logs/catapult.changes')
+      end
       `#{@git} pull origin develop`
       # only self update from catapult core if the same MAJOR
       `#{@git} fetch upstream`
+      # if there are changes between us and remote, write a changes file for later use
+      `#{@git} diff --exit-code --quiet develop upstream`
+      if $?.exitstatus > 0
+        FileUtils.touch('provisioners/redhat/logs/catapult.changes')
+      end
       @version_this = YAML.load_file("VERSION.yml")
       @version_this_integer = @version_this["version"].to_i
       @version_upstream = YAML.load(`#{@git} show upstream/master:VERSION.yml`)
@@ -332,7 +343,7 @@ module Catapult
       unless staged.include?("secrets/configuration.yml.gpg") || staged.include?("secrets/id_rsa.gpg") || staged.include?("secrets/id_rsa.pub.gpg")
         puts "You are trying to commit directly to the master branch, please create a pull request from release into master instead."
         exit 1
-      else 
+      else
         puts "To contribute to Catapult, please switch to the develop-catapult branch."
         exit 1
       end
@@ -514,6 +525,7 @@ module Catapult
       catapult_exception("Please set [\"company\"][\"timezone_windows\"] in secrets/configuration.yml")
     end
     # https://developers.digitalocean.com/documentation/v2/
+    puts "[DigitalOcean API]"
     if @configuration["company"]["digitalocean_personal_access_token"] == nil
       catapult_exception("Please set [\"company\"][\"digitalocean_personal_access_token\"] in secrets/configuration.yml")
     else
@@ -525,7 +537,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The DigitalOcean API could not authenticate, please verify [\"company\"][\"digitalocean_personal_access_token\"].")
         elsif response.code.to_f.between?(500,600)
-          puts "   - The DigitalOcean API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts "   - The DigitalOcean API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * DigitalOcean API authenticated successfully."
           api_digitalocean_account_keys = JSON.parse(response.body)
@@ -554,6 +566,7 @@ module Catapult
     end
     # http://docs.aws.amazon.com/general/latest/gr/sigv4_signing.html
     # http://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_Operations.html
+    puts "[AWS API]"
     if @configuration["company"]["aws_access_key"] == nil || @configuration["company"]["aws_secret_key"] == nil
       catapult_exception("Please set [\"company\"][\"aws_access_key\"] and [\"company\"][\"aws_secret_key\"] in secrets/configuration.yml")
     else
@@ -580,9 +593,9 @@ module Catapult
       # ************* TASK 1: CREATE A CANONICAL REQUEST *************
       # http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
       # Step 1 is to define the verb (GET, POST, etc.)--already done.
-      # Step 2: Create canonical URI--the part of the URI from domain to query 
+      # Step 2: Create canonical URI--the part of the URI from domain to query
       # string (use '/' if no path)
-      canonical_uri = '/' 
+      canonical_uri = '/'
       # Step 3: Create the canonical query string. In this example (a GET request),
       # request parameters are in the query string. Query string values must
       # be URL-encoded (space=%20). The parameters must be sorted by name.
@@ -595,7 +608,7 @@ module Catapult
       # Step 5: Create the list of signed headers. This lists the headers
       # in the canonical_headers list, delimited with ";" and in alpha order.
       # Note: The request can include any headers; canonical_headers and
-      # signed_headers lists those that you want to be included in the 
+      # signed_headers lists those that you want to be included in the
       # hash of the request. "Host" and "x-amz-date" are always required.
       signed_headers = 'host;x-amz-date'
       # Step 6: Create payload hash (hash of the request body content). For GET
@@ -615,7 +628,7 @@ module Catapult
       # Sign the string_to_sign using the signing_key
       signature = OpenSSL::HMAC.hexdigest('sha256', signing_key, string_to_sign)
       # ************* TASK 4: ADD SIGNING INFORMATION TO THE REQUEST *************
-      # The signing information can be either in a query string value or in 
+      # The signing information can be either in a query string value or in
       # a header named Authorization. This code shows how to use a header.
       # Create authorization header and add to request headers
       authorization_header = algorithm + ' ' + 'Credential=' + @configuration["company"]["aws_access_key"] + '/' + credential_scope + ', ' +  'SignedHeaders=' + signed_headers + ', ' + 'Signature=' + signature
@@ -630,7 +643,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The AWS API could not authenticate, please verify [\"company\"][\"aws_access_key\"] and [\"company\"][\"aws_secret_key\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * AWS API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * AWS API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * AWS API authenticated successfully."
           api_aws_account_keys = Nokogiri::XML.parse(response.body)
@@ -661,6 +674,7 @@ module Catapult
       end
     end
     # https://confluence.atlassian.com/display/BITBUCKET/Version+1
+    puts "[Bitbucket API]"
     if @configuration["company"]["bitbucket_username"] == nil || @configuration["company"]["bitbucket_password"] == nil
       catapult_exception("Please set [\"company\"][\"bitbucket_username\"] and [\"company\"][\"bitbucket_password\"] in secrets/configuration.yml")
     else
@@ -672,7 +686,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The Bitbucket API could not authenticate, please verify [\"company\"][\"bitbucket_username\"] and [\"company\"][\"bitbucket_password\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * Bitbucket API authenticated successfully."
           @api_bitbucket = JSON.parse(response.body)
@@ -710,6 +724,7 @@ module Catapult
       end
     end
     # https://developer.github.com/v3/
+    puts "[GitHub API]"
     if @configuration["company"]["github_username"] == nil || @configuration["company"]["github_password"] == nil
       catapult_exception("Please set [\"company\"][\"github_username\"] and [\"company\"][\"github_password\"] in secrets/configuration.yml")
     else
@@ -721,7 +736,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The GitHub API could not authenticate, please verify [\"company\"][\"github_username\"] and [\"company\"][\"github_password\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * GitHub API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * GitHub API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * GitHub API authenticated successfully."
           @api_github = JSON.parse(response.body)
@@ -759,74 +774,87 @@ module Catapult
       end
     end
     # https://docs.atlassian.com/bamboo/REST/
+    puts "[Bamboo API]"
     if @configuration["company"]["bamboo_base_url"] == nil || @configuration["company"]["bamboo_username"] == nil || @configuration["company"]["bamboo_password"] == nil
       catapult_exception("Please set [\"company\"][\"bamboo_base_url\"] and [\"company\"][\"bamboo_username\"] and [\"company\"][\"bamboo_password\"] in secrets/configuration.yml")
     else
-      uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/project.json?os_authType=basic")
-      Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
-        request = Net::HTTP::Get.new uri.request_uri
-        request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
-        response = http.request request
-        if response.code.to_f.between?(399,499)
-          catapult_exception("#{response.code} The Bamboo API could not authenticate, please verify [\"company\"][\"bamboo_base_url\"] and [\"company\"][\"bamboo_username\"] and [\"company\"][\"bamboo_password\"].")
-        elsif response.code.to_f.between?(500,600)
-          puts " * Bamboo API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-        else
-          puts " * Bamboo API authenticated successfully."
-          @api_bamboo = JSON.parse(response.body)
-          api_bamboo_project_key = @api_bamboo["projects"]["project"].find { |element| element["key"] == "CAT" }
-          unless api_bamboo_project_key
-            catapult_exception("Could not find the project key \"CAT\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
-          end
-          api_bamboo_project_name = @api_bamboo["projects"]["project"].find { |element| element["name"] == "Catapult" }
-          unless api_bamboo_project_name
-            catapult_exception("Could not find the project name \"Catapult\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
-          else
-            puts "   - Found the project key \"CAT\""
-          end
-        end
-        uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-TEST.json?os_authType=basic")
+      begin
+        uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/project.json?os_authType=basic")
         Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
           request = Net::HTTP::Get.new uri.request_uri
           request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
           response = http.request request
           if response.code.to_f.between?(399,499)
-            catapult_exception("Could not find the plan key \"TEST\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            catapult_exception("#{response.code} The Bamboo API could not authenticate, please verify [\"company\"][\"bamboo_base_url\"] and [\"company\"][\"bamboo_username\"] and [\"company\"][\"bamboo_password\"].")
           elsif response.code.to_f.between?(500,600)
-            puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+            puts " * Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
           else
-            puts "   - Found the plan key \"TEST\""
+            puts " * Bamboo API authenticated successfully."
+            @api_bamboo = JSON.parse(response.body)
+            api_bamboo_project_key = @api_bamboo["projects"]["project"].find { |element| element["key"] == "CAT" }
+            unless api_bamboo_project_key
+              catapult_exception("Could not find the project key \"CAT\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            end
+            api_bamboo_project_name = @api_bamboo["projects"]["project"].find { |element| element["name"] == "Catapult" }
+            unless api_bamboo_project_name
+              catapult_exception("Could not find the project name \"Catapult\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            else
+              puts "   - Found the project key \"CAT\""
+            end
+          end
+          uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-TEST.json?os_authType=basic")
+          Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+            request = Net::HTTP::Get.new uri.request_uri
+            request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
+            response = http.request request
+            if response.code.to_f.between?(399,499)
+              catapult_exception("Could not find the plan key \"TEST\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            elsif response.code.to_f.between?(500,600)
+              puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+            else
+              puts "   - Found the plan key \"TEST\""
+            end
+          end
+          uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-QC.json?os_authType=basic")
+          Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+            request = Net::HTTP::Get.new uri.request_uri
+            request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
+            response = http.request request
+            if response.code.to_f.between?(399,499)
+              catapult_exception("Could not find the plan key \"QC\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            elsif response.code.to_f.between?(500,600)
+              puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+            else
+              puts "   - Found the plan key \"QC\""
+            end
+          end
+          uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-PROD.json?os_authType=basic")
+          Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+            request = Net::HTTP::Get.new uri.request_uri
+            request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
+            response = http.request request
+            if response.code.to_f.between?(399,499)
+              catapult_exception("Could not find the plan key \"PROD\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
+            elsif response.code.to_f.between?(500,600)
+              puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+            else
+              puts "   - Found the plan key \"PROD\""
+            end
           end
         end
-        uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-QC.json?os_authType=basic")
-        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
-          request = Net::HTTP::Get.new uri.request_uri
-          request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
-          response = http.request request
-          if response.code.to_f.between?(399,499)
-            catapult_exception("Could not find the plan key \"QC\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
-          elsif response.code.to_f.between?(500,600)
-            puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-          else
-            puts "   - Found the plan key \"QC\""
-          end
-        end
-        uri = URI("#{@configuration["company"]["bamboo_base_url"]}rest/api/latest/result/CAT-PROD.json?os_authType=basic")
-        Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
-          request = Net::HTTP::Get.new uri.request_uri
-          request.basic_auth "#{@configuration["company"]["bamboo_username"]}", "#{@configuration["company"]["bamboo_password"]}"
-          response = http.request request
-          if response.code.to_f.between?(399,499)
-            catapult_exception("Could not find the plan key \"PROD\" in Bamboo, please follow the Services Setup for Bamboo at https://github.com/devopsgroup-io/catapult#services-setup")
-          elsif response.code.to_f.between?(500,600)
-            puts "   - The Bamboo API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
-          else
-            puts "   - Found the plan key \"PROD\""
-          end
-        end
+      rescue Net::ReadTimeout => ex
+        puts " * The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+        puts "   - Error was: #{ex.class}".color(Colors::RED)
+      rescue Errno::ETIMEDOUT => ex
+        puts " * The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+        puts "   - Error was: #{ex.class}".color(Colors::RED)
+      rescue Errno::ECONNREFUSED => ex
+        puts " * The Bamboo API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
+        puts "   - Error was: #{ex.class}".color(Colors::RED)
       end
     end
     # https://api.cloudflare.com/
+    puts "[CloudFlare API]"
     if @configuration["company"]["cloudflare_api_key"] == nil || @configuration["company"]["cloudflare_email"] == nil
       catapult_exception("Please set [\"company\"][\"cloudflare_api_key\"] and [\"company\"][\"cloudflare_email\"] in secrets/configuration.yml")
     else
@@ -839,7 +867,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The CloudFlare API could not authenticate, please verify [\"company\"][\"cloudflare_api_key\"] and [\"company\"][\"cloudflare_email\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * CloudFlare API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * CloudFlare API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * CloudFlare API authenticated successfully."
           @api_cloudflare = JSON.parse(response.body)
@@ -847,6 +875,7 @@ module Catapult
       end
     end
     # https://docs.newrelic.com/docs/apis/rest-api-v2
+    puts "[New Relic API]"
     if @configuration["company"]["newrelic_api_key"] == nil || @configuration["company"]["newrelic_license_key"] == nil
       catapult_exception("Please set [\"company\"][\"newrelic_api_key\"] and [\"company\"][\"newrelic_license_key\"] in secrets/configuration.yml")
     else
@@ -858,7 +887,7 @@ module Catapult
         if response.code.to_f.between?(399,499)
           catapult_exception("#{response.code} The New Relic API could not authenticate, please verify [\"company\"][\"newrelic_api_key\"] and [\"company\"][\"newrelic_license_key\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * New Relic API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * New Relic API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * New Relic API authenticated successfully."
           @api_cloudflare = JSON.parse(response.body)
@@ -866,6 +895,7 @@ module Catapult
       end
     end
     # https://docs.newrelic.com/docs/apis
+    puts "[New Relic Admin API]"
     if @configuration["company"]["newrelic_admin_api_key"] == nil
       catapult_exception("Please set [\"company\"][\"newrelic_admin_api_key\"] in secrets/configuration.yml")
     else
@@ -878,7 +908,7 @@ module Catapult
           puts " * New Relic Admin API could not authenticate (Synthetics tests will not be created).".color(Colors::YELLOW)
           #catapult_exception("#{response.code} The New Relic Admin API could not authenticate, please verify [\"company\"][\"newrelic_admin_api_key\"].")
         elsif response.code.to_f.between?(500,600)
-          puts " * New Relic Admin API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+          puts " * New Relic Admin API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
         else
           puts " * New Relic Admin API authenticated successfully."
           @api_cloudflare = JSON.parse(response.body)
@@ -906,7 +936,7 @@ module Catapult
         catapult_exception("#{response.code} The DigitalOcean API could not authenticate, please verify [\"company\"][\"digitalocean_personal_access_token\"].")
       elsif response.code.to_f.between?(500,600)
         @api_digitalocean = nil
-        puts " * The DigitalOcean API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+        puts " * The DigitalOcean API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
       else
         @api_digitalocean = JSON.parse(response.body)
       end
@@ -917,13 +947,13 @@ module Catapult
       request = Net::HTTP::Get.new uri.request_uri
       request.add_field "Authorization", "Bearer #{@configuration["company"]["digitalocean_personal_access_token"]}"
       response = http.request request
+      @api_digitalocean_slugs = Array.new
       if response.code.to_f.between?(399,499)
         catapult_exception("#{response.code} The DigitalOcean API could not authenticate, please verify [\"company\"][\"digitalocean_personal_access_token\"].")
       elsif response.code.to_f.between?(500,600)
-        puts " * The DigitalOcean API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+        puts " * The DigitalOcean API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
       else
         api_digitalocean_sizes = JSON.parse(response.body)
-        @api_digitalocean_slugs = Array.new
         api_digitalocean_sizes["sizes"].each do |size|
           @api_digitalocean_slugs.push("#{size["slug"]}")
         end
@@ -953,9 +983,9 @@ module Catapult
     # ************* TASK 1: CREATE A CANONICAL REQUEST *************
     # http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
     # Step 1 is to define the verb (GET, POST, etc.)--already done.
-    # Step 2: Create canonical URI--the part of the URI from domain to query 
+    # Step 2: Create canonical URI--the part of the URI from domain to query
     # string (use '/' if no path)
-    canonical_uri = '/' 
+    canonical_uri = '/'
     # Step 3: Create the canonical query string. In this example (a GET request),
     # request parameters are in the query string. Query string values must
     # be URL-encoded (space=%20). The parameters must be sorted by name.
@@ -968,7 +998,7 @@ module Catapult
     # Step 5: Create the list of signed headers. This lists the headers
     # in the canonical_headers list, delimited with ";" and in alpha order.
     # Note: The request can include any headers; canonical_headers and
-    # signed_headers lists those that you want to be included in the 
+    # signed_headers lists those that you want to be included in the
     # hash of the request. "Host" and "x-amz-date" are always required.
     signed_headers = 'host;x-amz-date'
     # Step 6: Create payload hash (hash of the request body content). For GET
@@ -988,7 +1018,7 @@ module Catapult
     # Sign the string_to_sign using the signing_key
     signature = OpenSSL::HMAC.hexdigest('sha256', signing_key, string_to_sign)
     # ************* TASK 4: ADD SIGNING INFORMATION TO THE REQUEST *************
-    # The signing information can be either in a query string value or in 
+    # The signing information can be either in a query string value or in
     # a header named Authorization. This code shows how to use a header.
     # Create authorization header and add to request headers
     authorization_header = algorithm + ' ' + 'Credential=' + @configuration["company"]["aws_access_key"] + '/' + credential_scope + ', ' +  'SignedHeaders=' + signed_headers + ', ' + 'Signature=' + signature
@@ -1004,7 +1034,7 @@ module Catapult
         catapult_exception("#{response.code} The AWS API could not authenticate, please verify [\"company\"][\"aws_access_key\"] and [\"company\"][\"aws_secret_key\"].")
       elsif response.code.to_f.between?(500,600)
         @api_aws = nil
-        puts " * AWS API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+        puts " * AWS API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
       else
         @api_aws = Nokogiri::XML.parse(response.body)
       end
@@ -1019,9 +1049,9 @@ module Catapult
       puts "\n[#{environment}]"
       puts "[machine]".ljust(45) + "[provider]".ljust(14) + "[state]".ljust(13) + "[id]".ljust(12) + "[type]".ljust(13) + "[ipv4_public]".ljust(17) + "[ipv4_private]".ljust(17)
       puts "\n"
-      
+
       @configuration["environments"]["#{environment}"]["servers"].each do |server,data|
-        
+
         # start new row
         row = Array.new
         # machine
@@ -1171,7 +1201,7 @@ module Catapult
             droplet = nil
           else
             droplet = @api_digitalocean["droplets"].find { |element| element['name'] == "#{@configuration["company"]["name"].downcase}-#{environment}-#{server.gsub("_","-")}" }
-            if "#{droplet["status"]}" != "active"
+            if droplet != nil && "#{droplet["status"]}" != "active"
               # any other status than active can not be trusted
               droplet = nil
             end
@@ -1205,8 +1235,10 @@ module Catapult
           if @configuration["environments"]["#{environment}"]["servers"]["#{server}"]["slug"] == nil
             catapult_exception("There is an error in your secrets/configuration.yml file.\nThe slug (DigitalOcean droplet size) for #{environment} => servers => redhat is empty and the droplet has not been created. Please choose from the following (see DigitalOcean.com for pricing):\n#{@api_digitalocean_slugs}")
           end
-          if not @api_digitalocean_slugs.include?("#{@configuration["environments"]["#{environment}"]["servers"]["#{server}"]["slug"]}")
-            catapult_exception("There is an error in your secrets/configuration.yml file.\nThe slug (DigitalOcean droplet size) for #{environment} => servers => redhat is invalid and the droplet has not been created. Please choose from the following (see DigitalOcean.com for pricing):\n#{@api_digitalocean_slugs}")
+          if @api_digitalocean_slugs.any?
+            if not @api_digitalocean_slugs.include?("#{@configuration["environments"]["#{environment}"]["servers"]["#{server}"]["slug"]}")
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe slug (DigitalOcean droplet size) for #{environment} => servers => redhat is invalid and the droplet has not been created. Please choose from the following (see DigitalOcean.com for pricing):\n#{@api_digitalocean_slugs}")
+            end
           end
           # ipv4_public
           if droplet != nil
@@ -1261,7 +1293,7 @@ module Catapult
                 if response.code.to_f.between?(399,499)
                   catapult_exception("#{response.code} The DigitalOcean API could not authenticate, please verify [\"company\"][\"digitalocean_personal_access_token\"].")
                 elsif response.code.to_f.between?(500,600)
-                  puts "   - The DigitalOcean API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                  puts "   - The DigitalOcean API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
                 else
                   puts "   - Successfully updated the kernel, moving on..."
                 end
@@ -1272,7 +1304,7 @@ module Catapult
         end
 
         puts row.join(" ")
-      
+
       end
       # if environment passwords do not exist, create them
       ######################################################################
@@ -1462,37 +1494,60 @@ module Catapult
 
 
     # validate @configuration["websites"]
-    puts "\nVerification of configuration[\"websites\"]:\n".color(Colors::WHITE)
+    puts "\nVerification of configuration[\"websites\"]:".color(Colors::WHITE)
     # add catapult temporarily to verify repo and add bamboo services
     @configuration["websites"]["catapult"] = *(["domain" => "#{@repo}", "repo" => "#{@repo}"])
     # validate @configuration["websites"]
     @configuration["websites"].each do |service,data|
       if "#{service}" == "catapult"
-        puts "\nVerification of this Catapult instance:\n".color(Colors::WHITE)
+        puts "\nVerification of this Catapult instance:".color(Colors::WHITE)
       end
       # create array of domains to later validate domain alpha order per service
       domains = Array.new
       domains_sorted = Array.new
       unless @configuration["websites"]["#{service}"] == nil
-        puts " [#{service}]"
+        puts "\n[#{service}] #{@configuration["websites"]["#{service}"].nil? ? "0" : @configuration["websites"]["#{service}"].length} total"
+        puts "[domain]".ljust(40) + "[repo]".ljust(12) + "[repo write access]".ljust(20) + "[develop]".ljust(16) + "[release]".ljust(16) + "[master]".ljust(16) + "[bamboo service]".ljust(18)
+        puts "\n"
         @configuration["websites"]["#{service}"].each do |instance|
-          puts " * #{instance["domain"]}"
+          # start new row
+          row = Array.new
+          # get domain
+          row.push(" * #{instance["domain"]}".slice!(0, 39).ljust(39))
           unless "#{service}" == "catapult"
             # validate the domain to ensure it only includes the domain and not protocol
             if instance["domain"].include? "://"
-              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain for websites => #{service} => domain => #{instance["domain"]} is invalid, it must not include http:// or https://")
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain for websites => #{service} => domain => #{instance["domain"]} is invalid, it must not include http:// or https://.")
+            end
+            # validate the domain_tld_override to ensure only valid characters
+            if not instance["domain"] =~ /^[0-9a-zA-Z\-\.]*$/
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain for websites => #{service} => domain => #{instance["domain"]} must only contain numbers, letters, hyphens, and periods.")
             end
             # validate the domain depth
             domain_depth = instance["domain"].split(".")
             if domain_depth.count > 3
-              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain for websites => #{service} => domain => #{instance["domain"]} is invalid, there is a maximum of one subdomain")
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain for websites => #{service} => domain => #{instance["domain"]} is invalid, there is a maximum of one subdomain.")
             end
-            # validate the domain_tld_overrided depth
             unless instance["domain_tld_override"] == nil
+              # validate the domain_tld_override to ensure it only includes the domain and not protocol
+              if instance["domain_tld_override"].include? "://"
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain_tld_override for websites => #{service} => domain => #{instance["domain"]} is invalid, it must not include http:// or https://.")
+              end
+              # validate the domain_tld_override to ensure only valid characters
+              if not instance["domain_tld_override"] =~ /^[0-9a-zA-Z\-\.]*$/
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain_tld_override for websites => #{service} => domain => #{instance["domain"]} must only contain numbers, letters, hyphens, and periods.")
+              end
+              # validate the domain_tld_override depth
               domain_tld_override_depth = instance["domain_tld_override"].split(".")
               if domain_tld_override_depth.count != 2
-                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain_tld_override for websites => #{service} => domain => #{instance["domain"]} is invalid, it must only be one domain level (company.com)")
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe domain_tld_override for websites => #{service} => domain => #{instance["domain"]} is invalid, it must only be one domain level (company.com).")
               end
+            end
+            # there is a maximum domain (including domain_tld_override) length of 53 characters
+            # max mysql database name length of 64 - 11 for longest prefix of production_ = 53
+            # max mssql database name length of 128
+            if (instance["domain"].length + (instance["domain_tld_override"].nil? ? 0 : instance["domain_tld_override"].length)) > 53
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe combination of domain and domain_tld_override for websites => #{service} => domain => #{instance["domain"]} must not exceed 53 characters in length.")
             end
           end
           # validate force_auth
@@ -1581,7 +1636,7 @@ module Catapult
               if response.code.to_f == 404
                 catapult_exception("The Bitbucket repo #{instance["repo"]} does not exist")
               elsif response.code.to_f.between?(399,600)
-                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_bitbucket_repo_repositories = JSON.parse(response.body)
                 if response.code.to_f == 200
@@ -1599,7 +1654,7 @@ module Catapult
               if response.code.to_f == 404
                 catapult_exception("The Bitbucket repo #{instance["repo"]} does not exist")
               elsif response.code.to_f.between?(399,600)
-                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_bitbucket_repo_privileges = JSON.parse(response.body)
                 api_bitbucket_repo_privileges.each do |member|
@@ -1619,7 +1674,7 @@ module Catapult
               if response.code.to_f == 404
                 catapult_exception("The Bitbucket repo #{instance["repo"]} does not exist")
               elsif response.code.to_f.between?(399,600)
-                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_bitbucket_repo_group_privileges = JSON.parse(response.body)
                 api_bitbucket_repo_group_privileges.each do |group|
@@ -1636,7 +1691,10 @@ module Catapult
             if @api_bitbucket_repo_access === false
               catapult_exception("Your Bitbucket user #{@configuration["company"]["bitbucket_username"]} does not have write access to this repository.")
             elsif @api_bitbucket_repo_access === true
-              puts "   - Verified your Bitbucket user #{@configuration["company"]["bitbucket_username"]} has write access."
+              # get repo type
+              row.push("bitbucket".ljust(11))
+              # get repo user access
+              row.push("#{@configuration["company"]["bitbucket_username"]}".slice!(0, 19).ljust(19))
             end
           end
           if "#{repo_split_2[0]}" == "github.com"
@@ -1648,10 +1706,13 @@ module Catapult
               if response.code.to_f == 404
                 catapult_exception("The GitHub repo #{instance["repo"]} does not exist")
               elsif response.code.to_f.between?(399,600)
-                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 if response.code.to_f == 204
-                  puts "   - Verified your GitHub user #{@configuration["company"]["github_username"]} has write access."
+                  # get repo type
+                  row.push("github".ljust(11))
+                  # get repo user access
+                  row.push("#{@configuration["company"]["github_username"]}".slice!(0, 19).ljust(19))
                 else
                   catapult_exception("Your GitHub user #{@configuration["company"]["github_username"]} does not have write access to this repository.")
                 end
@@ -1666,7 +1727,7 @@ module Catapult
               request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
               response = http.request request # Net::HTTPResponse object
               if response.code.to_f.between?(399,600)
-                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_bitbucket_repo_branches = JSON.parse(response.body)
                 @api_bitbucket_repo_develop = false
@@ -1686,17 +1747,17 @@ module Catapult
                 unless @api_bitbucket_repo_develop
                   catapult_exception("Cannot find the develop branch for this repository, please create one.")
                 else
-                  puts "   - Found the develop branch."
+                  row.push("exists".ljust(15))
                 end
                 unless @api_bitbucket_repo_release
                   catapult_exception("Cannot find the release branch for this repository, please create one.")
                 else
-                  puts "   - Found the release branch."
+                  row.push("exists".ljust(15))
                 end
                 unless @api_bitbucket_repo_master
                   catapult_exception("Cannot find the master branch for this repository, please create one.")
                 else
-                  puts "   - Found the master branch."
+                  row.push("exists".ljust(15))
                 end
               end
             end
@@ -1708,7 +1769,7 @@ module Catapult
               request.basic_auth "#{@configuration["company"]["github_username"]}", "#{@configuration["company"]["github_password"]}"
               response = http.request request # Net::HTTPResponse object
               if response.code.to_f.between?(399,600)
-                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_github_repo_branches = JSON.parse(response.body)
                 @api_github_repo_develop = false
@@ -1728,17 +1789,17 @@ module Catapult
                 unless @api_github_repo_develop
                   catapult_exception("Cannot find the develop branch for this repository, please create one.")
                 else
-                  puts "   - Found the develop branch."
+                  row.push("exists".ljust(15))
                 end
                 unless @api_github_repo_release
                   catapult_exception("Cannot find the release branch for this repository, please create one.")
                 else
-                  puts "   - Found the release branch."
+                  row.push("exists".ljust(15))
                 end
                 unless @api_github_repo_master
                   catapult_exception("Cannot find the master branch for this repository, please create one.")
                 else
-                  puts "   - Found the master branch."
+                  row.push("exists".ljust(15))
                 end
               end
             end
@@ -1752,26 +1813,66 @@ module Catapult
               request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
               response = http.request request # Net::HTTPResponse object
               if response.code.to_f.between?(399,600)
-                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The Bitbucket API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               else
                 api_bitbucket_services = JSON.parse(response.body)
-                @api_bitbucket_services_bamboo_cat_test = false
-                @api_bitbucket_services_bamboo_cat_qc = false
+                @api_bitbucket_services_bamboo_cat_test = 0
                 api_bitbucket_services.each do |service|
                   if service["service"]["type"] == "Bamboo"
                     service["service"]["fields"].each do |field|
                       if field["name"] == "Plan Key"
                         if field["value"] == "CAT-TEST"
-                          @api_bitbucket_services_bamboo_cat_test = true
+                          @api_bitbucket_services_bamboo_cat_test = @api_bitbucket_services_bamboo_cat_test + 1
+                          # remove potential duplicates
+                          if @api_bitbucket_services_bamboo_cat_test > 1
+                            uri = URI("https://api.bitbucket.org/1.0/repositories/#{repo_split_3[0]}/services/#{service["id"]}")
+                            Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+                              request = Net::HTTP::Delete.new uri.request_uri
+                              request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
+                              response = http.request request # Net::HTTPResponse object
+                              if response.code.to_f.between?(399,600)
+                                catapult_exception("Unable to configure Bitbucket Bamboo service for websites => #{service} => domain => #{instance["domain"]}. Ensure the github_username defined in secrets/configuration.yml has correct access to the repository.")
+                              end
+                            end
+                          # update existing
+                          else
+                            uri = URI("https://api.bitbucket.org/1.0/repositories/#{repo_split_3[0]}/services/#{service["id"]}")
+                            Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+                              request = Net::HTTP::Put.new uri.request_uri
+                              request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
+                              request.body = URI::encode\
+                                (""\
+                                  "type=Bamboo"\
+                                  "&URL=#{@configuration["company"]["bamboo_base_url"]}"\
+                                  "&Plan Key=CAT-TEST"\
+                                  "&Username=#{@configuration["company"]["bamboo_username"]}"\
+                                  "&Password=#{@configuration["company"]["bamboo_password"]}"\
+                                "")
+                              response = http.request request # Net::HTTPResponse object
+                              if response.code.to_f.between?(399,600)
+                                catapult_exception("Unable to configure Bitbucket Bamboo service for websites => #{service} => domain => #{instance["domain"]}. Ensure the github_username defined in secrets/configuration.yml has correct access to the repository.")
+                              end
+                            end
+                          end
                         end
+                        # remove known service plans we no longer want
                         if field["value"] == "CAT-QC"
-                          @api_bitbucket_services_bamboo_cat_qc = true
+                          uri = URI("https://api.bitbucket.org/1.0/repositories/#{repo_split_3[0]}/services/#{service["id"]}")
+                          Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
+                            request = Net::HTTP::Delete.new uri.request_uri
+                            request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
+                            response = http.request request # Net::HTTPResponse object
+                            if response.code.to_f.between?(399,600)
+                              catapult_exception("Unable to configure Bitbucket Bamboo service for websites => #{service} => domain => #{instance["domain"]}. Ensure the github_username defined in secrets/configuration.yml has correct access to the repository.")
+                            end
+                          end
                         end
                       end
                     end
                   end
                 end
-                unless @api_bitbucket_services_bamboo_cat_test
+                # create the service if it does not exist
+                unless @api_bitbucket_services_bamboo_cat_test > 0
                   uri = URI("https://api.bitbucket.org/1.0/repositories/#{repo_split_3[0]}/services")
                   Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
                     request = Net::HTTP::Post.new uri.request_uri
@@ -1781,25 +1882,6 @@ module Catapult
                         "type=Bamboo"\
                         "&URL=#{@configuration["company"]["bamboo_base_url"]}"\
                         "&Plan Key=CAT-TEST"\
-                        "&Username=#{@configuration["company"]["bamboo_username"]}"\
-                        "&Password=#{@configuration["company"]["bamboo_password"]}"\
-                      "")
-                    response = http.request request # Net::HTTPResponse object
-                    if response.code.to_f.between?(399,600)
-                      catapult_exception("Unable to configure Bitbucket Bamboo service for websites => #{service} => domain => #{instance["domain"]}. Ensure the github_username defined in secrets/configuration.yml has correct access to the repository.")
-                    end
-                  end
-                end
-                unless @api_bitbucket_services_bamboo_cat_qc
-                  uri = URI("https://api.bitbucket.org/1.0/repositories/#{repo_split_3[0]}/services")
-                  Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == 'https') do |http|
-                    request = Net::HTTP::Post.new uri.request_uri
-                    request.basic_auth "#{@configuration["company"]["bitbucket_username"]}", "#{@configuration["company"]["bitbucket_password"]}"
-                    request.body = URI::encode\
-                      (""\
-                        "type=Bamboo"\
-                        "&URL=#{@configuration["company"]["bamboo_base_url"]}"\
-                        "&Plan Key=CAT-QC"\
                         "&Username=#{@configuration["company"]["bamboo_username"]}"\
                         "&Password=#{@configuration["company"]["bamboo_password"]}"\
                       "")
@@ -1826,20 +1908,20 @@ module Catapult
                   "\"config\":"\
                     "{"\
                       "\"base_url\":\"#{@configuration["company"]["bamboo_base_url"]}\","\
-                      "\"build_key\":\"develop:CAT-TEST,release:CAT-QC\","\
+                      "\"build_key\":\"develop:CAT-TEST\","\
                       "\"username\":\"#{@configuration["company"]["bamboo_username"]}\","\
                       "\"password\":\"#{@configuration["company"]["bamboo_password"]}\""\
                     "}"\
                 "}"
               response = http.request request # Net::HTTPResponse object
               if response.code.to_f.between?(500,600)
-                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning and automated deployments)".color(Colors::RED)
+                puts "   - The GitHub API seems to be down, skipping... (this may impact provisioning, deployments, and dashboard reporting)".color(Colors::RED)
               elsif response.code.to_f.between?(399,499)
                 catapult_exception("Unable to configure GitHub Bamboo service for websites => #{service} => domain => #{instance["domain"]}. Ensure the github_username defined in secrets/configuration.yml has correct access to the repository.")
               end
             end
           end
-          puts "   - Configured Bamboo service for automated deployments."
+          row.push("configured".ljust(17))
           # validate software
           unless instance["software"] == nil
             # create an array of available software
@@ -1847,11 +1929,31 @@ module Catapult
             unless @provisioners["software"]["#{service}"] == nil
               @provisioners["software"]["#{service}"].each { |i, v| provisioners_software.push(i) }
             end
+            # validate software
             unless provisioners_software.include?("#{instance["software"]}")
               catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be one of the following #{provisioners_software.join(", ")}.")
             end
+            # validate software_auto_update
+            unless instance["software_auto_update"] == nil
+              if instance["software_auto_update"].to_s != "true"
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software_auto_update for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be \"true\" or not set.")
+              end
+            end
+            # validate software_dbprefix
+            unless instance["software_dbprefix"] == nil
+              if not instance["software_dbprefix"] =~ /^[0-9a-zA-Z\_]*$/
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software_dbprefix for websites => #{service} => domain => #{instance["domain"]} is invalid, it must only contain numbers, letters, and underscores.")
+              end
+            end
+            # validate software_dbtable_retain
+            unless instance["software_dbtable_retain"] == nil
+              if not instance["software_dbtable_retain"].kind_of?(Array)
+                catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software_dbtable_retain for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be an array in the following example format [\"comments\",\"commentmeta\"].")
+              end
+            end
+            # validate software_workflow
             unless ["downstream","upstream"].include?("#{instance["software_workflow"]}")
-              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software for websites => #{service} => domain => #{instance["domain"]} requires the software_workflow option, it must be one of the following [\"downstream\",\"upstream\"].")
+              catapult_exception("There is an error in your secrets/configuration.yml file.\nThe software_workflow for websites => #{service} => domain => #{instance["domain"]} is invalid, it must be one of the following [\"downstream\",\"upstream\"].")
             end
           end
           # validate webroot
@@ -1860,6 +1962,9 @@ module Catapult
               catapult_exception("There is an error in your secrets/configuration.yml file.\nThe webroot for websites => #{service} => domain => #{instance["domain"]} is invalid, it must include a trailing slash.")
             end
           end
+
+          puts row.join(" ")
+
         end
       end
       # ensure domains are in alpha order
@@ -1898,9 +2003,8 @@ module Catapult
 
     # vagrant status binding
     if ["status"].include?(ARGV[0])
-      totalwebsites = 0
       # start a new row
-      puts "\n\n\nAvailable websites legend:".color(Colors::WHITE)
+      puts "\nAvailable websites legend:".color(Colors::WHITE)
       puts "\n[http response codes]"
       puts " * The below http response codes are started from http:// and up to 10 redirects allowed - so if you're forcing https://, you will end up with that code below."
       puts "   - 200 ok, 301 moved permanently, 302 found"
@@ -1912,12 +2016,10 @@ module Catapult
 
       @configuration["websites"].each do |service,data|
         puts "\n[#{service}] #{@configuration["websites"]["#{service}"].nil? ? "0" : @configuration["websites"]["#{service}"].length} total"
-        puts "[domain]".ljust(40) + "[domain_tld_override]".ljust(30) + "[software]".ljust(21) + "[workflow]".ljust(14) + "[80:dev.]".ljust(22) + "[80:test.]".ljust(22) + "[80:qc.]".ljust(22) + "[80:production]"
+        puts "[domain]".ljust(40) + "[domain_tld_override]".ljust(30) + "[software]".ljust(21) + "[eol]".ljust(12) + "[workflow]".ljust(14) + "[force_https]".ljust(15) + "[80:dev.]".ljust(22) + "[80:test.]".ljust(22) + "[80:qc.]".ljust(22) + "[80:production]"
         puts "\n"
         if @configuration["websites"]["#{service}"] != nil
           @configuration["websites"]["#{service}"].each do |instance|
-            # count websites
-            totalwebsites = totalwebsites + 1
             # start new row
             row = Array.new
             # get domain
@@ -1926,8 +2028,20 @@ module Catapult
             row.push("#{instance["domain_tld_override"]}".slice!(0, 29).ljust(29))
             # get software
             row.push((instance["software"] || "").ljust(20))
-            # get software workflow
+            # get software eol
+            software_eol = nil
+            if !defined?(@provisioners["software"]["#{service}"]["#{instance["software"]}"]["eol"]) || (@provisioners["software"]["#{service}"]["#{instance["software"]}"]["eol"].nil?)
+              # no eol
+            else
+              if Date.parse(@provisioners["software"]["#{service}"]["#{instance["software"]}"]["eol"]) < Date.today
+                software_eol = "#{@provisioners["software"]["#{service}"]["#{instance["software"]}"]["eol"]} ".color(Colors::RED)
+              end
+            end
+            row.push((software_eol || "").ljust(11))
+            # get software_workflow
             row.push((instance["software_workflow"] || "").ljust(13))
+            # get force_https
+            row.push((instance["force_https"].to_s || "").ljust(14))
             # get http response code per environment
             @configuration["environments"].each do |environment,data|
               response = nil

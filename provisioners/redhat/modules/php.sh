@@ -38,7 +38,6 @@ sudo yum install -y php-dom
 sudo yum install -y php-mysql
 
 # epel extensions
-sudo yum install -y epel-release
 # Extra Packages for Enterprise Linux (or EPEL) is a Fedora Special Interest Group that creates, maintains, and manages a high quality set of additional packages for Enterprise Linux, including, but not limited to, Red Hat Enterprise Linux (RHEL), CentOS and Scientific Linux (SL), Oracle Linux (OL).
 sudo yum install -y php-mcrypt
 
@@ -85,6 +84,8 @@ sudo pecl upgrade uploadprogress
 # output installed pecl extensions once finished
 sudo pecl list
 
-# reload httpd configuration for changes to reflect
-# reload httpd to clear zend opcache
-systemctl reload httpd.service
+if ([ "${4}" == "apache" ]); then
+    # reload httpd configuration for changes to reflect
+    # reload httpd to clear zend opcache
+    systemctl reload httpd.service
+fi
