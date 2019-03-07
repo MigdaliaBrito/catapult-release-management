@@ -41,6 +41,7 @@ if [ -d "/var/www/repositories/apache/${domain}/.git" ]; then
             && git config core.fileMode false \
             && git config core.packedGitLimit 128m \
             && git config core.packedGitWindowSize 128m \
+            && git config merge.renameLimit 999999 \
             && git config pack.deltaCacheSize 128m \
             && git config pack.packSizeLimit 128m \
             && git config pack.threads 1 \
@@ -54,6 +55,15 @@ if [ -d "/var/www/repositories/apache/${domain}/.git" ]; then
             # manage the database config file entry in the .gitignore file
             if ! grep -q "${webroot}${softwareroot}${database_config_file}" "/var/www/repositories/apache/${domain}/.gitignore"; then
                sudo bash -c "echo \"${webroot}${softwareroot}${database_config_file}\" >> \"/var/www/repositories/apache/${domain}/.gitignore\""
+            fi
+            # manage the php-fpm .user.ini file entry in the .gitignore file
+            if ! grep -q "${webroot}${softwareroot}.user.ini" "/var/www/repositories/apache/${domain}/.gitignore"; then
+               sudo bash -c "echo \"${webroot}${softwareroot}.user.ini\" >> \"/var/www/repositories/apache/${domain}/.gitignore\""
+            fi
+            # manage the _sql directory entry in the .gitignore file
+            sed -i '/_sql/,$d' "/var/www/repositories/apache/${domain}/.gitignore"
+            if ! grep -q "_sql/*.sql" "/var/www/repositories/apache/${domain}/.gitignore"; then
+               sudo bash -c "echo \"_sql/*.sql\" >> \"/var/www/repositories/apache/${domain}/.gitignore\""
             fi
             # add everything in the repository to the git index (keep in mind untracked file stores)
             cd "/var/www/repositories/apache/${domain}" \
@@ -84,7 +94,7 @@ if [ -d "/var/www/repositories/apache/${domain}/.git" ]; then
                                 echo -e "- this website file store will be rsynced"
                                 echo -e "- rely on virtual machine backups for disaster recovery"
                                 cd "/var/www/repositories/apache/${domain}" \
-                                    && git reset --all "${file_store}"
+                                    && git reset --mixed "${file_store}"
                             else
                                 echo -e "- this website file store is tracked and within the limit to commit [$(( ${file_store_size} / 1024 ))MB / $(( ${directory_size_maximum} / 1024 ))MB max]"
                                 echo -e "- this website file store will be committed"
@@ -106,9 +116,7 @@ if [ -d "/var/www/repositories/apache/${domain}/.git" ]; then
             fi
             # after we have a diff, continute to pull
             cd "/var/www/repositories/apache/${domain}" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git pull origin ${branch}" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git submodule update --init --recursive" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git push origin ${branch}"
+                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git pull origin ${branch} && git submodule update --init --recursive && git push origin ${branch}"
         # git reset files and branch if outside of branch and software_workflow
         else
             # stash any pending work in localdev as a courtesy (branch may vary)
@@ -131,17 +139,13 @@ if [ -d "/var/www/repositories/apache/${domain}/.git" ]; then
             fi
             # after we have a diff, continue to pull
             cd "/var/www/repositories/apache/${domain}" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git pull origin ${branch}" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git submodule update --init --recursive"
+                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git pull origin ${branch} && git submodule update --init --recursive"
         fi
         # if we're on develop, pull master into develop to keep it up to date
         # this accomodates software_workflow = downstream and software_workflow = upstream (when dbtable_retain commits)
         if ([ "${branch_this}" = "develop" ]); then
             cd "/var/www/repositories/apache/${domain}" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git fetch" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git pull origin master" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git submodule update --init --recursive" \
-                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git push origin ${branch}"
+                && sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git fetch && git pull origin master && git submodule update --init --recursive && git push origin ${branch}"
         fi
         # last but not least, run git gc to cleanup unnecessary files and optimize the local repository
         # using the --auto flag will prevent gc from running every time, which on larger repositories can take a while
@@ -155,6 +159,7 @@ else
         sudo rm --force --recursive "/var/www/repositories/apache/${domain}"
     fi
     sudo ssh-agent bash -c "ssh-add /catapult/secrets/id_rsa; git clone --recursive -b ${branch} ${repo} /var/www/repositories/apache/${domain}"
+    touch "/catapult/provisioners/redhat/logs/domain.${domain}.changes"
 fi
 
 touch "/catapult/provisioners/redhat/logs/git.${domain}.complete"

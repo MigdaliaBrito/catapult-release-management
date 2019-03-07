@@ -1,12 +1,7 @@
 source "/catapult/provisioners/redhat/modules/catapult.sh"
 
 # set variables from secrets/configuration.yml
-mysql_user="$(echo "${configuration}" | shyaml get-value environments.$1.servers.redhat_mysql.mysql.user)"
-mysql_user_password="$(echo "${configuration}" | shyaml get-value environments.$1.servers.redhat_mysql.mysql.user_password)"
-mysql_root_password="$(echo "${configuration}" | shyaml get-value environments.$1.servers.redhat_mysql.mysql.root_password)"
-redhat_ip="$(echo "${configuration}" | shyaml get-value environments.$1.servers.redhat.ip)"
-redhat_mysql_ip="$(echo "${configuration}" | shyaml get-value environments.$1.servers.redhat_mysql.ip)"
-company_email="$(echo "${configuration}" | shyaml get-value company.email)"
+company_email="$(catapult company.email)"
 
 # create a vhost per website
 echo "${configuration}" | shyaml get-values-0 websites.apache |
@@ -24,7 +19,6 @@ while IFS='' read -r -d '' key; do
     else
         domain_root="${domain}"
     fi
-    domainvaliddbname=$(echo "$key" | grep -w "domain" | cut -d ":" -f 2 | tr -d " " | tr "." "_" | tr "-" "_")
     domainvalidcertname=$(echo "$key" | grep -w "domain" | cut -d ":" -f 2 | tr -d " " | tr "." "_")
     if [ "$1" != "production" ]; then
         domainvalidcertname="${1}_${domainvalidcertname}"
@@ -32,8 +26,11 @@ while IFS='' read -r -d '' key; do
     force_auth=$(echo "$key" | grep -w "force_auth" | cut -d ":" -f 2 | tr -d " ")
     force_auth_exclude=$(echo "$key" | grep -w "force_auth_exclude" | tr -d " ")
     force_https=$(echo "$key" | grep -w "force_https" | cut -d ":" -f 2 | tr -d " ")
+    force_ip=$(echo "$key" | grep -w "force_ip" | tr -d " ")
+    force_ip_exclude=$(echo "$key" | grep -w "force_ip_exclude" | tr -d " ")
     software=$(echo "$key" | grep -w "software" | cut -d ":" -f 2 | tr -d " ")
     software_dbprefix=$(echo "$key" | grep -w "software_dbprefix" | cut -d ":" -f 2 | tr -d " ")
+    software_php_version=$(provisioners software.apache.${software}.php_version)
     software_workflow=$(echo "$key" | grep -w "software_workflow" | cut -d ":" -f 2 | tr -d " ")
     webroot=$(echo "$key" | grep -w "webroot" | cut -d ":" -f 2 | tr -d " ")
 
@@ -95,37 +92,74 @@ EOF
             "
         fi
     else
-        # never force_auth in dev
         force_auth_value=""
     fi
-    # handle ssl certificates
-    # if there is a specified custom certificate available
+    # handle the force_ip option
+    if ([ ! -z "${force_ip}" ]); then
+        if ([ ! -z "${force_ip_exclude}" ]); then
+            force_ip_excludes=($(echo "${key}" | shyaml get-values force_ip_exclude))
+            if ([[ "${force_ip_excludes[@]}" =~ "$1" ]]); then
+                force_ip_value=""
+            else
+                force_ip_value="
+                    <Location />
+                        Require all denied
+                "
+                while IFS='' read -r -d '' ip; do
+                    force_ip_value+="
+                        Require ip ${ip}
+                    "
+                done < <(echo "${key}" | shyaml get-values-0 force_ip)
+                force_ip_value+="
+                    </Location>
+                "
+            fi
+        else
+            force_ip_value="
+                <Location />
+                    Require all denied
+            "
+            while IFS='' read -r -d '' ip; do
+                force_ip_value+="
+                    Require ip ${ip}
+                "
+            done < <(echo "${key}" | shyaml get-values-0 force_ip)
+            force_ip_value+="
+                </Location>
+            "
+        fi
+    else
+        force_ip_value=""
+    fi
+    # handle https certificates
+    # if there is a specified custom certificate available and it does not expire within the next 86400 seconds (1 day)
     if ([ -f "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/${domainvalidcertname}.ca-bundle" ] \
      && [ -f "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/${domainvalidcertname}.crt" ] \
      && [ -f "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/server.csr" ] \
-     && [ -f "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/server.key" ]); then
-        ssl_certificates="
+     && [ -f "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/server.key" ] \
+     && [ $(openssl x509 -checkend 86400 -noout -in "/var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/${domainvalidcertname}.crt") ]); then
+        https_certificates="
         SSLCertificateFile /var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/${domainvalidcertname}.crt
         SSLCertificateKeyFile /var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/server.key
         SSLCertificateChainFile /var/www/repositories/apache/${domain}/_cert/${domainvalidcertname}/${domainvalidcertname}.ca-bundle
         "
     # upstream without domain_tld_override and a letsencrypt cert available
     elif ([ "$1" != "dev" ]) && ([ -z "${domain_tld_override}" ]) && ([ -f /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/cert.pem ]); then
-        ssl_certificates="
+        https_certificates="
         SSLCertificateFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/cert.pem
         SSLCertificateKeyFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/privkey.pem
         SSLCertificateChainFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}/chain.pem
         "
     # upstream with domain_tld_override and a letsencrypt cert available
     elif ([ "$1" != "dev" ]) && ([ ! -z "${domain_tld_override}" ]) && ([ -f /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/cert.pem ]); then
-        ssl_certificates="
+        https_certificates="
         SSLCertificateFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/cert.pem
         SSLCertificateKeyFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/privkey.pem
         SSLCertificateChainFile /catapult/provisioners/redhat/installers/dehydrated/certs/${domain_environment}.${domain_tld_override}/chain.pem
         "
     # self-signed in localdev or if we do not have a letsencrypt cert
     else
-        ssl_certificates="
+        https_certificates="
         SSLCertificateFile /etc/ssl/certs/httpd-dummy-cert.key.cert
         SSLCertificateKeyFile /etc/ssl/certs/httpd-dummy-cert.key.cert
         "
@@ -144,12 +178,45 @@ EOF
         force_https_value="# HTTPS is only forced when force_https=true"
         force_https_hsts="# HSTS is only enabled when force_https=true"
     fi
+    # handle the software php_version setting
+    if [ "${software_php_version}" = "7.2" ]; then
+        software_php_version_value="
+        <FilesMatch \.php$>
+            SetHandler \"proxy:fcgi://127.0.0.1:9720\"
+        </FilesMatch>
+        "
+    elif [ "${software_php_version}" = "7.1" ]; then
+        software_php_version_value="
+        <FilesMatch \.php$>
+            SetHandler \"proxy:fcgi://127.0.0.1:9710\"
+        </FilesMatch>
+        "
+    elif [ "${software_php_version}" = "7.0" ]; then
+        software_php_version_value="
+        <FilesMatch \.php$>
+            SetHandler \"proxy:fcgi://127.0.0.1:9700\"
+        </FilesMatch>
+        "
+    elif [ "${software_php_version}" = "5.4" ]; then
+        software_php_version_value="
+        <FilesMatch \.php$>
+            SetHandler \"proxy:fcgi://127.0.0.1:9540\"
+        </FilesMatch>
+        "
+    else
+        software_php_version_value="
+        <FilesMatch \.php$>
+            SetHandler \"proxy:fcgi://127.0.0.1:9540\"
+        </FilesMatch>
+        "
+    fi
     # write vhost apache conf file
     sudo cat > /etc/httpd/sites-available/${domain_environment}.conf << EOF
 
     RewriteEngine On
 
     <VirtualHost *:80> # must listen * to support cloudflare
+
         ServerAdmin ${company_email}
         ServerName ${domain_environment}
         ServerAlias www.${domain_environment}
@@ -158,12 +225,21 @@ EOF
         ErrorLog /var/log/httpd/${domain_environment}/error_log
         CustomLog /var/log/httpd/${domain_environment}/access_log combined
         LogLevel warn
+
+        # force http basic auth if configured
         ${force_auth_value}
+
+        # force visitor ip address if configured
+        ${force_ip_value}
+
+        # force https if configured
         ${force_https_value}
+
     </VirtualHost>
 
     <IfModule mod_ssl.c>
         <VirtualHost *:443> # must listen * to support cloudflare
+
             ServerAdmin ${company_email}
             ServerName ${domain_environment}
             ServerAlias www.${domain_environment}
@@ -195,27 +271,51 @@ EOF
             # help old browsers
             BrowserMatch "MSIE [2-5]" nokeepalive ssl-unclean-shutdown downgrade-1.0 force-response-1.0
 
-            # set the ssl certificates
-            ${ssl_certificates}
+            # set the https certificates
+            ${https_certificates}
 
-            # force httpd basic auth if configured
+            # force http basic auth if configured
             ${force_auth_value}
+
+            # force visitor ip address if configured
+            ${force_ip_value}
 
         </VirtualHost>
     </IfModule>
 
-    # allow .htaccess in apache 2.4+
+    # define apache ruleset for the web root
     <Directory "/var/www/repositories/apache/${domain}/${webroot}">
+
+        # allow .htaccess in apache 2.4+
         AllowOverride All
         Options -Indexes +FollowSymlinks
-        # define new relic appname
-        <IfModule php5_module>
-            php_value newrelic.appname "${domain_environment};$(catapult company.name | tr '[:upper:]' '[:lower:]')-${1}-redhat"
+
+        # define the php version being used
+        ${software_php_version_value}
+
+        # allow /manifest.json to be accessed regardless of basic auth as /manifest.json is usually accessed out of basic auth context
+        <Files "manifest.json">
+            <IfModule mod_authz_core.c>
+                Satisfy Any
+                Allow from all
+            </IfModule>
+        </Files>
+
+        # set security related response headers
+        # https://www.owasp.org/index.php/OWASP_Secure_Headers_Project#tab=Headers
+        # https://securityheaders.io/?q=devopsgroup.io&followRedirects=on
+        # https://github.com/h5bp/server-configs-apache/tree/master/src/security
+        <IfModule mod_headers.c>
+            #Header set Content-Security-Policy "script-src 'self'; object-src 'self'"
+            Header set X-Content-Type-Options: "nosniff"
+            Header set X-Frame-Options: "sameorigin"
+            Header set X-XSS-Protection: "1; mode=block"
         </IfModule>
+
+        # compress certain content types before being sent to the client over the network
+        # https://github.com/h5bp/server-configs-apache
+        # https://httpd.apache.org/docs/current/mod/mod_filter.html#addoutputfilterbytype
         <IfModule mod_deflate.c>
-            # compressed certain content types before being sent to the client over the network
-            # https://github.com/h5bp/server-configs-apache
-            # https://httpd.apache.org/docs/current/mod/mod_filter.html#addoutputfilterbytype
             <IfModule mod_filter.c>
                 AddOutputFilterByType DEFLATE "application/atom+xml"
                 AddOutputFilterByType DEFLATE "application/javascript"
@@ -251,12 +351,102 @@ EOF
                 AddOutputFilterByType DEFLATE "text/xml"
             </IfModule>
         </IfModule>
+
+        # allow ETags as there is only one data store (Apache does a file stat so serving the same file from multiple servers would invalidate ETags)
+        # https://github.com/expressjs/express/issues/2445
+        # https://gist.github.com/6a68/4971859
+        # https://github.com/h5bp/server-configs-apache
+        # https://tools.ietf.org/html/rfc7232#section-2.3
+        # https://httpd.apache.org/docs/2.4/mod/core.html#fileetag
+        FileETag MTime Size
+
+        # serve resources with far-future expires headers
+        # (!) if you don't control versioning with filename-based cache busting, you should consider lowering the cache times to something like one week
+        # (!) cloudflare uses 4 hours as a default cache expiration
+        # https://support.cloudflare.com/hc/en-us/articles/200172516-Which-file-extensions-does-Cloudflare-cache-for-static-content-
+        # https://support.cloudflare.com/hc/en-us/article_attachments/212266867/cachable.txt
+        # (!) cloudflare automatically respects longer cache expiration specified by the server
+        # https://support.cloudflare.com/hc/en-us/articles/200168276
+        # (!) google pagespeed insights requires the cache level to be set to at least 7 days to pass the test
+        # https://github.com/h5bp/server-configs-apache
+        # https://httpd.apache.org/docs/current/mod/mod_expires.html
+        <IfModule mod_expires.c>
+            ExpiresActive on
+            ExpiresDefault                                      "access plus 1 week"
+          # CSS
+            ExpiresByType text/css                              "access plus 1 week"
+          # Data interchange
+            ExpiresByType application/atom+xml                  "access plus 1 hour"
+            ExpiresByType application/rdf+xml                   "access plus 1 hour"
+            ExpiresByType application/rss+xml                   "access plus 1 hour"
+            ExpiresByType application/json                      "access plus 0 seconds"
+            ExpiresByType application/ld+json                   "access plus 0 seconds"
+            ExpiresByType application/schema+json               "access plus 0 seconds"
+            ExpiresByType application/vnd.geo+json              "access plus 0 seconds"
+            ExpiresByType application/xml                       "access plus 0 seconds"
+            ExpiresByType text/xml                              "access plus 0 seconds"
+          # Favicon (cannot be renamed!) and cursor images
+            ExpiresByType image/vnd.microsoft.icon              "access plus 1 week"
+            ExpiresByType image/x-icon                          "access plus 1 week"
+          # HTML
+            ExpiresByType text/html                             "access plus 0 seconds"
+          # JavaScript
+            ExpiresByType application/javascript                "access plus 1 week"
+            ExpiresByType application/x-javascript              "access plus 1 week"
+            ExpiresByType text/javascript                       "access plus 1 week"
+          # Manifest files
+            ExpiresByType application/manifest+json             "access plus 1 week"
+            ExpiresByType application/x-web-app-manifest+json   "access plus 0 seconds"
+            ExpiresByType text/cache-manifest                   "access plus 0 seconds"
+          # Media files
+            ExpiresByType audio/ogg                             "access plus 1 week"
+            ExpiresByType image/bmp                             "access plus 1 week"
+            ExpiresByType image/gif                             "access plus 1 week"
+            ExpiresByType image/jpeg                            "access plus 1 week"
+            ExpiresByType image/png                             "access plus 1 week"
+            ExpiresByType image/svg+xml                         "access plus 1 week"
+            ExpiresByType image/webp                            "access plus 1 week"
+            ExpiresByType video/mp4                             "access plus 1 week"
+            ExpiresByType video/ogg                             "access plus 1 week"
+            ExpiresByType video/webm                            "access plus 1 week"
+          # Web fonts
+            # Embedded OpenType (EOT)
+            ExpiresByType application/vnd.ms-fontobject         "access plus 1 month"
+            ExpiresByType font/eot                              "access plus 1 month"
+            # OpenType
+            ExpiresByType font/opentype                         "access plus 1 month"
+            # TrueType
+            ExpiresByType application/x-font-ttf                "access plus 1 month"
+            # Web Open Font Format (WOFF) 1.0
+            ExpiresByType application/font-woff                 "access plus 1 month"
+            ExpiresByType application/x-font-woff               "access plus 1 month"
+            ExpiresByType font/woff                             "access plus 1 month"
+            # Web Open Font Format (WOFF) 2.0
+            ExpiresByType application/font-woff2                "access plus 1 month"
+          # Other
+            ExpiresByType text/x-cross-domain-policy            "access plus 1 week"
+        </IfModule>
+
     </Directory>
 
-    # deny access to _sql folders
-    <Directory "/var/www/repositories/apache/${domain}/${webroot}_sql">
-        Order Deny,Allow
-        Deny From All
+    # deny access to .git folder
+    <Directory "/var/www/repositories/apache/${domain}/.git">
+        Require all denied
+    </Directory>
+
+    # deny access to _append folder
+    <Directory "/var/www/repositories/apache/${domain}/_append">
+        Require all denied
+    </Directory>
+
+    # deny access to _cert folder
+    <Directory "/var/www/repositories/apache/${domain}/_cert">
+        Require all denied
+    </Directory>
+
+    # deny access to _sql folder
+    <Directory "/var/www/repositories/apache/${domain}/_sql">
+        Require all denied
     </Directory>
 
 EOF
@@ -265,6 +455,13 @@ EOF
     if [ ! -f /etc/httpd/sites-enabled/$domain_environment.conf ]; then
         sudo ln -s /etc/httpd/sites-available/$domain_environment.conf /etc/httpd/sites-enabled/$domain_environment.conf
     fi
+
+    # set a .user.ini file for php-fpm to read
+    sudo mkdir --parents /var/www/repositories/apache/${domain}/${webroot}
+    sudo touch /var/www/repositories/apache/${domain}/${webroot}/.user.ini
+    sudo cat > /var/www/repositories/apache/${domain}/${webroot}/.user.ini << EOF
+newrelic.appname="${domain_environment};$(catapult company.name | tr '[:upper:]' '[:lower:]')-${1}-redhat"
+EOF
 
 done
 

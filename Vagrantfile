@@ -14,7 +14,7 @@ Vagrant.configure("2") do |config|
   config.hostmanager.include_offline = true
 
   # centos
-  # virtualbox    https://atlas.hashicorp.com/centos/boxes/7
+  # virtualbox    https://app.vagrantup.com/centos/boxes/7
   # digitalocean  https://developers.digitalocean.com/documentation/v2/#list-all-distribution-images
 
   # windows
@@ -26,11 +26,11 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = "1gb"
+      provider.size = "s-1vcpu-3gb"
       provider.ipv6 = true
       provider.private_networking = true
       provider.backups_enabled = true
@@ -49,15 +49,16 @@ Vagrant.configure("2") do |config|
     config.vm.provider :virtualbox do |provider|
       provider.memory = 512
       provider.cpus = 1
+      provider.customize ["modifyvm", :id, "--audio", "none"]
     end
     # configure hosts file on both the host and guest
     config.vm.provision :hostmanager
     config.hostmanager.aliases = Catapult::Command.dev_redhat_hosts
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
-    config.vm.synced_folder ".", "/catapult", type: "nfs"
+    config.vm.synced_folder ".", "/catapult", mount_options: ["nolock,vers=3,udp,noatime,fsc,actimeo=1"], type: "nfs"
     # sync the repositories folder for local access from the host
-    config.vm.synced_folder "repositories", "/var/www/repositories", type: "nfs"
+    config.vm.synced_folder "repositories", "/var/www/repositories", mount_options: ["nolock,vers=3,udp,noatime,fsc,actimeo=1"], type: "nfs"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["dev","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","apache"]
     # ensure httpd is started once the synced_folder is mounted: fixes https://github.com/devopsgroup-io/catapult/issues/681
@@ -69,6 +70,7 @@ Vagrant.configure("2") do |config|
     config.vm.provider :virtualbox do |provider|
       provider.memory = 512
       provider.cpus = 1
+      provider.customize ["modifyvm", :id, "--audio", "none"]
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
@@ -84,17 +86,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["test"]["servers"]["redhat"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["test"]["servers"]["redhat"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
       provider.backups_enabled = true
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["test","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","apache"]
   end
@@ -102,17 +106,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["test"]["servers"]["redhat_mysql"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["test"]["servers"]["redhat_mysql"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
       provider.backups_enabled = true
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["test","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","mysql"]
   end
@@ -122,17 +128,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["qc"]["servers"]["redhat"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["qc"]["servers"]["redhat"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
-      provider.backups_enabled = true
+      provider.backups_enabled = false
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["qc","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","apache"]
   end
@@ -140,17 +148,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["qc"]["servers"]["redhat_mysql"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["qc"]["servers"]["redhat_mysql"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
-      provider.backups_enabled = true
+      provider.backups_enabled = false
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["qc","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","mysql"]
   end
@@ -160,17 +170,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["production"]["servers"]["redhat"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["production"]["servers"]["redhat"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
       provider.backups_enabled = true
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["production","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","apache"]
   end
@@ -178,17 +190,19 @@ Vagrant.configure("2") do |config|
     config.vm.provider :digital_ocean do |provider,override|
       override.ssh.private_key_path = "secrets/id_rsa"
       override.vm.box = "digital_ocean"
-      override.vm.box_url = "https://github.com/smdahlen/vagrant-digitalocean/raw/master/box/digital_ocean.box"
+      override.vm.box_url = "https://github.com/devopsgroup-io/vagrant-digitalocean/raw/master/box/digital_ocean.box"
       provider.token = Catapult::Command.configuration["company"]["digitalocean_personal_access_token"]
       provider.image = "centos-7-x64"
       provider.region = "nyc3"
-      provider.size = Catapult::Command.configuration["environments"]["production"]["servers"]["redhat_mysql"]["slug"] || "512mb"
+      provider.size = Catapult::Command.configuration["environments"]["production"]["servers"]["redhat_mysql"]["slug"] || "s-1vcpu-1gb"
       provider.ipv6 = true
       provider.private_networking = true
       provider.backups_enabled = true
     end
     # disable the default vagrant share
     config.vm.synced_folder ".", "/vagrant", disabled: true
+    # copy the ssh private key to root's home folder
+    config.vm.provision "file", source: "secrets/id_rsa", destination: "/root/.ssh/id_rsa"
     # configure the provisioner
     config.vm.provision "shell", path: "provisioners/redhat/provision.sh", args: ["production","#{Catapult::Command.repo}","#{Catapult::Command.configuration_user["settings"]["gpg_key"]}","mysql"]
   end
@@ -201,6 +215,7 @@ Vagrant.configure("2") do |config|
     config.vm.provider :virtualbox do |provider|
       provider.memory = 1024
       provider.cpus = 1
+      provider.customize ["modifyvm", :id, "--audio", "none"]
     end
     # windows specific configuration
     config.vm.guest = :windows
@@ -225,6 +240,7 @@ Vagrant.configure("2") do |config|
     config.vm.provider :virtualbox do |provider|
       provider.memory = 1024
       provider.cpus = 1
+      provider.customize ["modifyvm", :id, "--audio", "none"]
     end
     # windows specific configuration
     config.vm.guest = :windows
@@ -247,7 +263,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["test"]["servers"]["windows"]["type"] || "t2.micro"
       provider.tags = {
@@ -275,7 +291,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["test"]["servers"]["windows_mssql"]["type"] || "t2.micro"
       provider.tags = {
@@ -305,7 +321,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["qc"]["servers"]["windows"]["type"] || "t2.micro"
       provider.tags = {
@@ -333,7 +349,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["qc"]["servers"]["windows_mssql"]["type"] || "t2.micro"
       provider.tags = {
@@ -363,7 +379,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["production"]["servers"]["windows"]["type"] || "t2.micro"
       provider.tags = {
@@ -391,7 +407,7 @@ Vagrant.configure("2") do |config|
       override.vm.box_url = "https://github.com/mitchellh/vagrant-aws/raw/master/dummy.box"
       provider.access_key_id = Catapult::Command.configuration["company"]["aws_access_key"]
       provider.secret_access_key = Catapult::Command.configuration["company"]["aws_secret_key"]
-      provider.ami = "ami-11e84107"
+      provider.ami = "ami-b8f3b5c7"
       provider.region = "us-east-1"
       provider.instance_type = Catapult::Command.configuration["environments"]["production"]["servers"]["windows_mssql"]["type"] || "t2.micro"
       provider.tags = {
